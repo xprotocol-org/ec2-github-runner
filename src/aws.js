@@ -125,6 +125,7 @@ async function startEc2Instance(githubToken) {
         },
       },
     ],
+    MetadataOptions: { HttpTokens: 'required' },
     UserData: Buffer.from(userData).toString('base64'),
     SubnetId: config.input.subnetId,
     SecurityGroupIds: [config.input.securityGroupId],
