@@ -45,6 +45,8 @@ async function startEc2Instance(label, githubRegistrationToken) {
     TagSpecifications: config.tagSpecifications,
   };
 
+  core.info(`Gonna tag runner with tags ${JSON.stringify(config.tagSpecifications)}`);
+
   try {
     const result = await ec2.runInstances(params);
     const ec2InstanceId = result.Instances[0].InstanceId;
