@@ -16,11 +16,16 @@ class Config {
       runnerHomeDir: core.getInput('runner-home-dir'),
     };
 
-    const tags = JSON.parse(core.getInput('aws-resource-tags'));
+    const jsonTags = JSON.parse(core.getInput('aws-resource-tags'));
     this.tagSpecifications = null;
-    if (tags.length > 0) {
-      this.tagSpecifications = [{ResourceType: 'instance', Tags: tags}, {ResourceType: 'volume', Tags: tags}];
+    let tags = [];
+    for (const [key, value] of Object.entries(jsonTags)) {
+      tags.push({ Key: key, Value: value });
     }
+    this.tagSpecifications = [
+      { ResourceType: 'instance', Tags: tags },
+      { ResourceType: 'volume', Tags: tags },
+    ];
 
     // the values of github.context.repo.owner and github.context.repo.repo are taken from
     // the environment variable GITHUB_REPOSITORY specified in "owner/repo" format and
