@@ -1,4 +1,4 @@
-import * as AWS from '@aws-sdk/client-ec2';
+const AWS = require('@aws-sdk/client-ec2');
 const core = require('@actions/core');
 const config = require('./config');
 
@@ -44,6 +44,8 @@ async function startEc2Instance(label, githubRegistrationToken) {
     IamInstanceProfile: { Name: config.input.iamRoleName },
     TagSpecifications: config.tagSpecifications,
   };
+
+  core.info(`Gonna tag runner with tags ${JSON.stringify(config.tagSpecifications)}`);
 
   try {
     const result = await ec2.runInstances(params);
