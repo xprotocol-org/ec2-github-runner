@@ -1,4 +1,4 @@
-const AWS = require('aws-sdk');
+const AWS = require('@aws-sdk/client-ec2');
 const core = require('@actions/core');
 const config = require('./config');
 
@@ -46,7 +46,7 @@ async function startEc2Instance(label, githubRegistrationToken) {
   };
 
   try {
-    const result = await ec2.runInstances(params).promise();
+    const result = await ec2.runInstances(params);
     const ec2InstanceId = result.Instances[0].InstanceId;
     core.info(`AWS EC2 instance ${ec2InstanceId} is started`);
     return ec2InstanceId;
@@ -64,7 +64,7 @@ async function terminateEc2Instance() {
   };
 
   try {
-    await ec2.terminateInstances(params).promise();
+    await ec2.terminateInstances(params);
     core.info(`AWS EC2 instance ${config.input.ec2InstanceId} is terminated`);
     return;
   } catch (error) {
@@ -81,7 +81,7 @@ async function waitForInstanceRunning(ec2InstanceId) {
   };
 
   try {
-    await ec2.waitFor('instanceRunning', params).promise();
+    await AWS.waitUntilInstanceRunning({ client: ec2, maxWaitTime: 90 }, params);
     core.info(`AWS EC2 instance ${ec2InstanceId} is up and running`);
     return;
   } catch (error) {
