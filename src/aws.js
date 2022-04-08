@@ -126,7 +126,7 @@ async function waitForInstanceRunning(ec2InstanceId) {
   };
 
   try {
-    await AWS.waitUntilInstanceRunning({ client: ec2, maxWaitTime: 90 }, params);
+    await AWS.waitUntilInstanceRunning({ client: ec2, maxWaitTime: 300 }, params);
     core.info(`AWS EC2 instance ${ec2InstanceId} is up and running`);
     return;
   } catch (error) {
