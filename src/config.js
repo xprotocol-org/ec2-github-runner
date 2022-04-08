@@ -14,18 +14,14 @@ class Config {
       ec2InstanceId: core.getInput('ec2-instance-id'),
       iamRoleName: core.getInput('iam-role-name'),
       runnerHomeDir: core.getInput('runner-home-dir'),
+      reuseRunner: core.getInput('reuse-runner'),
     };
 
     const jsonTags = JSON.parse(core.getInput('aws-resource-tags'));
-    this.tagSpecifications = null;
-    let tags = [];
+    this.tagSpecifications = [];
     for (const [key, value] of Object.entries(jsonTags)) {
-      tags.push({ Key: key, Value: value });
+      this.tagSpecifications.push({ Key: key, Value: value });
     }
-    this.tagSpecifications = [
-      { ResourceType: 'instance', Tags: tags },
-      { ResourceType: 'volume', Tags: tags },
-    ];
 
     // the values of github.context.repo.owner and github.context.repo.repo are taken from
     // the environment variable GITHUB_REPOSITORY specified in "owner/repo" format and

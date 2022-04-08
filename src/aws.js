@@ -33,7 +33,7 @@ async function startEc2Instance(label, githubRegistrationToken) {
 
   const userData = buildUserDataScript(githubRegistrationToken, label);
 
-  const params = {
+  const runParams = {
     ImageId: config.input.ec2ImageId,
     InstanceType: config.input.ec2InstanceType,
     MinCount: 1,
@@ -42,15 +42,53 @@ async function startEc2Instance(label, githubRegistrationToken) {
     SubnetId: config.input.subnetId,
     SecurityGroupIds: [config.input.securityGroupId],
     IamInstanceProfile: { Name: config.input.iamRoleName },
-    TagSpecifications: config.tagSpecifications,
+    TagSpecifications: [
+      { ResourceType: 'instance', Tags: config.tagSpecifications },
+      { ResourceType: 'volume', Tags: config.tagSpecifications },
+    ],
+    InstanceInitiatedShutdownBehavior: 'stop',
   };
 
-  core.info(`Gonna tag runner with tags ${JSON.stringify(config.tagSpecifications)}`);
+  const startParams = {
+    InstanceIds: [],
+  };
+  if (config.input.reuseRunner === 'true') {
+    let tagsFilters = [];
+    let instanceId = null;
+
+    for (const tag of config.tagSpecifications) {
+      tagsFilters.push({ Name: `tag:${tag.Key}`, Values: [tag.Value] });
+    }
+    const describeParams = {
+      Filters: tagsFilters,
+    };
+
+    core.info(`Checking for hibernated instance with filter ${JSON.stringify(describeParams)}`);
+
+    try {
+      const result = await ec2.describeInstances(describeParams);
+      if (result.Reservations !== null && result.Reservations.length > 0 && result.Reservations[0].Instances[0].State.Name !== 'terminated') {
+        instanceId = result.Reservations[0].Instances[0].InstanceId;
+      }
+      if (instanceId !== null && instanceId !== undefined) {
+        startParams.InstanceIds.push(instanceId);
+      }
+    } catch (error) {
+      core.error('Failed to check for hibernated instance');
+      throw error;
+    }
+  }
 
   try {
-    const result = await ec2.runInstances(params);
+    if (config.input.reuseRunner === 'true' && startParams.InstanceIds.length > 0) {
+      const result = await ec2.startInstances(startParams);
+      const ec2InstanceId = result.StartingInstances[0].InstanceId;
+      core.info(`AWS EC2 instance ${ec2InstanceId} is starting`);
+      return;
+    }
+    const result = await ec2.runInstances(runParams);
     const ec2InstanceId = result.Instances[0].InstanceId;
-    core.info(`AWS EC2 instance ${ec2InstanceId} is started`);
+    core.info(`AWS EC2 instance ${ec2InstanceId} is starting`);
     return ec2InstanceId;
   } catch (error) {
     core.error('AWS EC2 instance starting error');
@@ -66,6 +104,11 @@ async function terminateEc2Instance() {
   };
 
   try {
+    if (config.input.reuseRunner === 'true') {
+      await ec2.stopInstances(params);
+      core.info(`AWS EC2 instance ${config.input.ec2InstanceId} is stopped`);
+      return;
+    }
     await ec2.terminateInstances(params);
     core.info(`AWS EC2 instance ${config.input.ec2InstanceId} is terminated`);
     return;
