@@ -84,7 +84,7 @@ async function startEc2Instance(label, githubRegistrationToken) {
       const result = await ec2.startInstances(startParams);
       const ec2InstanceId = result.StartingInstances[0].InstanceId;
       core.info(`AWS EC2 instance ${ec2InstanceId} is starting`);
-      return;
+      return ec2InstanceId;
     }
     const result = await ec2.runInstances(runParams);
     const ec2InstanceId = result.Instances[0].InstanceId;
