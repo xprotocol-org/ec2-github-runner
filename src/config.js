@@ -10,7 +10,6 @@ class Config {
       ec2InstanceType: core.getInput('ec2-instance-type'),
       subnetId: core.getInput('subnet-id'),
       securityGroupId: core.getInput('security-group-id'),
-      label: core.getInput('label'),
       ec2InstanceId: core.getInput('ec2-instance-id'),
       iamRoleName: core.getInput('iam-role-name'),
       runnerHomeDir: core.getInput('runner-home-dir'),
@@ -48,16 +47,12 @@ class Config {
         throw new Error(`Not all the required inputs are provided for the 'start' mode`);
       }
     } else if (this.input.mode === 'stop') {
-      if (!this.input.label || !this.input.ec2InstanceId) {
-        throw new Error(`Not all the required inputs are provided for the 'stop' mode`);
+      if (!this.input.ec2InstanceId) {
+        throw new Error(`ec2InstanceId is required for the 'stop' mode`);
       }
     } else {
       throw new Error('Wrong mode. Allowed values: start, stop.');
     }
-  }
-
-  generateUniqueLabel() {
-    return Math.random().toString(36).substr(2, 5);
   }
 }
 

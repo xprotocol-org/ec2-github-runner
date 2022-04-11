@@ -43,12 +43,6 @@ inputs:
       The runner doesn't require any inbound traffic. However, outbound traffic should be allowed.
       This input is required if you use the 'start' mode.
     required: false
-  label:
-    description: >-
-      Name of the unique label assigned to the runner.
-      The label is used to remove the runner from GitHub when the runner is not needed anymore.
-      This input is required if you use the 'stop' mode or 'reuse-runner'.
-    required: false
   ec2-instance-id:
     description: >-
       EC2 Instance Id of the created runner.
@@ -72,12 +66,6 @@ inputs:
       Directory that contains actions-runner software and scripts. E.g. /home/runner/actions-runner.
     required: false
 outputs:
-  label:
-    description: >-
-      Name of the unique label assigned to the runner.
-      The label is used in two cases:
-      - to use as the input of 'runs-on' property for the following jobs;
-      - to remove the runner from GitHub when it is not needed anymore.
   ec2-instance-id:
     description: >-
       EC2 Instance Id of the created runner.

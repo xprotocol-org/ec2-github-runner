@@ -3,7 +3,7 @@ const core = require('@actions/core');
 const config = require('./config');
 
 // User data scripts are run as the root user
-function buildUserDataScript(githubRegistrationToken, label) {
+function buildUserDataScript(githubRegistrationToken) {
   if (config.input.runnerHomeDir) {
     // If runner home directory is specified, we expect the actions-runner software (and dependencies)
     // to be pre-installed in the AMI, so we simply cd into that directory and then start the runner
@@ -29,11 +29,13 @@ Content-Disposition: attachment; filename="userdata.txt"
 #!/bin/bash
 cd "${config.input.runnerHomeDir}"
 export RUNNER_ALLOW_RUNASROOT=1
+TOKEN=$(curl -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600")
+INSTANCE_ID=$(curl -H "X-aws-ec2-metadata-token: $\{TOKEN\}" -v http://169.254.169.254/latest/meta-data/instance-id)
 echo 'Configuring runner'
 ./config.sh \
   --url https://github.com/${config.githubContext.owner}/${config.githubContext.repo} \
   --token ${githubRegistrationToken} \
-  --labels ${label} \
+  --labels $\{INSTANCE_ID\} \
   --work _work \
   --ephemeral
 echo 'Starting runner'
@@ -72,10 +74,13 @@ else
   cd actions-runner
 fi
 echo 'Configuring runner'
+TOKEN=$(curl -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600")
+INSTANCE_ID=$(curl -H "X-aws-ec2-metadata-token: $\{TOKEN\}" -v http://169.254.169.254/latest/meta-data/instance-id)
+echo 'Configuring runner'
 ./config.sh \
   --url https://github.com/${config.githubContext.owner}/${config.githubContext.repo} \
   --token ${githubRegistrationToken} \
-  --labels ${label} \
+  --labels $\{INSTANCE_ID\} \
   --work _work \
   --ephemeral
 echo 'Starting runner'
@@ -84,10 +89,10 @@ echo 'Starting runner'
   }
 }
 
-async function startEc2Instance(label, githubRegistrationToken) {
+async function startEc2Instance(githubRegistrationToken) {
   const ec2 = new AWS.EC2();
 
-  const userData = buildUserDataScript(githubRegistrationToken, label);
+  const userData = buildUserDataScript(githubRegistrationToken);
 
   const runParams = {
     ImageId: config.input.ec2ImageId,
