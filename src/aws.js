@@ -3,6 +3,7 @@ const core = require('@actions/core');
 const config = require('./config');
 
 // User data scripts are run as the root user
+/* eslint-disable no-useless-escape */
 function buildUserDataScript(githubRegistrationToken) {
   if (config.input.runnerHomeDir) {
     // If runner home directory is specified, we expect the actions-runner software (and dependencies)
@@ -114,7 +115,7 @@ async function startEc2Instance(githubRegistrationToken) {
     InstanceIds: [],
   };
   if (config.input.reuseRunner === 'true') {
-    let tagsFilters = [];
+    const tagsFilters = [];
     let instanceId = null;
 
     for (const tag of config.tagSpecifications) {
