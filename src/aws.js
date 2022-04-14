@@ -29,9 +29,11 @@ Content-Disposition: attachment; filename="userdata.txt"
 
 #!/bin/bash
 cd "${config.input.runnerHomeDir}"
-export RUNNER_ALLOW_RUNASROOT=1
+echo 'Getting token to get metadata of EC2 instance'
 TOKEN=$(curl -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600")
+echo 'Getting ec2 instance id'
 INSTANCE_ID=$(curl -H "X-aws-ec2-metadata-token: $\{TOKEN\}" -v http://169.254.169.254/latest/meta-data/instance-id)
+echo 'Got instance id $\{INSTANCE_ID\}'
 echo 'Configuring runner'
 ./config.sh \
   --url https://github.com/${config.githubContext.owner}/${config.githubContext.repo} \
@@ -74,9 +76,11 @@ if [ ! -d "./actions-runner" ]; then
 else
   cd actions-runner
 fi
-echo 'Configuring runner'
+echo 'Getting token to get metadata of EC2 instance'
 TOKEN=$(curl -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600")
+echo 'Getting ec2 instance id'
 INSTANCE_ID=$(curl -H "X-aws-ec2-metadata-token: $\{TOKEN\}" -v http://169.254.169.254/latest/meta-data/instance-id)
+echo 'Got instance id $\{INSTANCE_ID\}'
 echo 'Configuring runner'
 ./config.sh \
   --url https://github.com/${config.githubContext.owner}/${config.githubContext.repo} \
