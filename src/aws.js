@@ -4,7 +4,7 @@ const config = require('./config');
 
 // User data scripts are run as the root user
 /* eslint-disable no-useless-escape */
-function buildUserDataScript(githubRegistrationToken) {
+function buildUserDataScript(githubToken) {
   if (config.input.runnerHomeDir) {
     // If runner home directory is specified, we expect the actions-runner software (and dependencies)
     // to be pre-installed in the AMI, so we simply cd into that directory and then start the runner
@@ -29,19 +29,36 @@ Content-Disposition: attachment; filename="userdata.txt"
 
 #!/bin/bash
 cd "${config.input.runnerHomeDir}"
-echo 'Getting token to get metadata of EC2 instance'
+
+echo Getting token to get metadata of EC2 instance
 TOKEN=$(curl -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600")
-echo 'Getting ec2 instance id'
+echo Getting ec2 instance id
 INSTANCE_ID=$(curl -H "X-aws-ec2-metadata-token: $\{TOKEN\}" -v http://169.254.169.254/latest/meta-data/instance-id)
-echo 'Got instance id $\{INSTANCE_ID\}'
-echo 'Configuring runner'
+echo Got instance id $INSTANCE_ID
+
+if [ ! -f "./jq" ]; then
+  curl -L https://github.com/stedolan/jq/releases/download/jq-1.6/jq-linux64 -o jq
+  chmod +x ./jq
+fi
+
+echo Getting runner token
+RUNNER_TOKEN=$(curl -s -XPOST \
+  -H "authorization: token ${githubToken}" \
+  https://api.github.com/repos/${config.githubContext.owner}/${config.githubContext.repo}/actions/runners/registration-token | \
+  ./jq -r .token)
+if [ -f ".runner" ]; then
+  echo Unregistering old runner data
+  ./config.sh remove --token $RUNNER_TOKEN
+fi
+echo Registering runner
 ./config.sh \
   --url https://github.com/${config.githubContext.owner}/${config.githubContext.repo} \
-  --token ${githubRegistrationToken} \
-  --labels $\{INSTANCE_ID\} \
-  --work _work \
-  --ephemeral
-echo 'Starting runner'
+  --token $RUNNER_TOKEN \
+  --labels $INSTANCE_ID \
+  --name $INSTANCE_ID \
+  --work _work
+
+echo Starting runner
 ./run.sh
 --//--`;
   } else {
@@ -67,7 +84,7 @@ Content-Disposition: attachment; filename="userdata.txt"
 #!/bin/bash
 export RUNNER_ALLOW_RUNASROOT=1
 if [ ! -d "./actions-runner" ]; then
-  echo 'Installing runner'
+  echo Installing runner
   mkdir -p actions-runner
   cd actions-runner
   case $(uname -m) in aarch64) ARCH="arm64" ;; amd64|x86_64) ARCH="x64" ;; esac && export RUNNER_ARCH=$\{ARCH\}
@@ -76,28 +93,45 @@ if [ ! -d "./actions-runner" ]; then
 else
   cd actions-runner
 fi
-echo 'Getting token to get metadata of EC2 instance'
+
+echo Getting token to get metadata of EC2 instance
 TOKEN=$(curl -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600")
-echo 'Getting ec2 instance id'
+echo Getting ec2 instance id
 INSTANCE_ID=$(curl -H "X-aws-ec2-metadata-token: $\{TOKEN\}" -v http://169.254.169.254/latest/meta-data/instance-id)
-echo 'Got instance id $\{INSTANCE_ID\}'
-echo 'Configuring runner'
+echo Got instance id $INSTANCE_ID
+
+if [ ! -f "./jq" ]; then
+  curl -L https://github.com/stedolan/jq/releases/download/jq-1.6/jq-linux64 -o jq
+  chmod +x ./jq
+fi
+
+echo Getting runner token
+RUNNER_TOKEN=$(curl -s -XPOST \
+  -H "authorization: token ${githubToken}" \
+  https://api.github.com/repos/${config.githubContext.owner}/${config.githubContext.repo}/actions/runners/registration-token | \
+  ./jq -r .token)
+if [ -f ".runner" ]; then
+  echo Unregistering old runner data
+  ./config.sh remove --token $RUNNER_TOKEN
+fi
+echo Registering runner
 ./config.sh \
   --url https://github.com/${config.githubContext.owner}/${config.githubContext.repo} \
-  --token ${githubRegistrationToken} \
-  --labels $\{INSTANCE_ID\} \
-  --work _work \
-  --ephemeral
-echo 'Starting runner'
+  --token $RUNNER_TOKEN \
+  --labels $INSTANCE_ID \
+  --name $INSTANCE_ID \
+  --work _work
+
+echo Starting runner
 ./run.sh
 --//--`;
   }
 }
 
-async function startEc2Instance(githubRegistrationToken) {
+async function startEc2Instance(githubToken) {
   const ec2 = new AWS.EC2();
 
-  const userData = buildUserDataScript(githubRegistrationToken);
+  const userData = buildUserDataScript(githubToken);
 
   const runParams = {
     ImageId: config.input.ec2ImageId,

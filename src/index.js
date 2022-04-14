@@ -8,8 +8,7 @@ function setOutput(ec2InstanceId) {
 }
 
 async function start() {
-  const githubRegistrationToken = await gh.getRegistrationToken();
-  const ec2InstanceId = await aws.startEc2Instance(githubRegistrationToken);
+  const ec2InstanceId = await aws.startEc2Instance(config.input.githubToken);
   setOutput(ec2InstanceId);
   await aws.waitForInstanceRunning(ec2InstanceId);
   await gh.waitForRunnerRegistered(ec2InstanceId);
