@@ -17,20 +17,6 @@ async function getRunner(ec2InstanceId) {
   }
 }
 
-// get GitHub Registration Token for registering a self-hosted runner
-async function getRegistrationToken() {
-  const octokit = github.getOctokit(config.input.githubToken);
-
-  try {
-    const response = await octokit.request('POST /repos/{owner}/{repo}/actions/runners/registration-token', config.githubContext);
-    core.info('GitHub Registration Token is received');
-    return response.data.token;
-  } catch (error) {
-    core.error('GitHub Registration Token receiving error');
-    throw error;
-  }
-}
-
 async function removeRunner() {
   const runner = await getRunner(config.input.ec2InstanceId);
   const octokit = github.getOctokit(config.input.githubToken);
@@ -86,7 +72,6 @@ async function waitForRunnerRegistered(ec2InstanceId) {
 }
 
 module.exports = {
-  getRegistrationToken,
   removeRunner,
   waitForRunnerRegistered,
 };
