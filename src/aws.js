@@ -4,7 +4,7 @@ const config = require('./config');
 
 // User data scripts are run as the root user
 /* eslint-disable no-useless-escape */
-function buildUserDataScript(githubRegistrationToken) {
+function buildUserDataScript(githubToken) {
   if (config.input.runnerHomeDir) {
     // If runner home directory is specified, we expect the actions-runner software (and dependencies)
     // to be pre-installed in the AMI, so we simply cd into that directory and then start the runner
@@ -29,15 +29,23 @@ Content-Disposition: attachment; filename="userdata.txt"
 
 #!/bin/bash
 cd "${config.input.runnerHomeDir}"
+if [ ! -f "./jq" ]; then
+  curl https://github.com/stedolan/jq/releases/download/jq-1.6/jq-linux64 -o jq
+  chmod +x ./jq
+fi
 echo 'Getting token to get metadata of EC2 instance'
 TOKEN=$(curl -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600")
 echo 'Getting ec2 instance id'
 INSTANCE_ID=$(curl -H "X-aws-ec2-metadata-token: $\{TOKEN\}" -v http://169.254.169.254/latest/meta-data/instance-id)
 echo 'Got instance id $\{INSTANCE_ID\}'
+RUNNER_TOKEN=$(curl -s -XPOST \
+  -H "authorization: token ${githubToken}" \
+  https://api.github.com/repos/wayofthepie/gh-app-test/actions/runners/registration-token |\
+  jq -r .token)
 echo 'Configuring runner'
 ./config.sh \
   --url https://github.com/${config.githubContext.owner}/${config.githubContext.repo} \
-  --token ${githubRegistrationToken} \
+  --token $\{RUNNER_TOKEN\} \
   --labels $\{INSTANCE_ID\} \
   --work _work \
   --ephemeral
@@ -76,15 +84,23 @@ if [ ! -d "./actions-runner" ]; then
 else
   cd actions-runner
 fi
+if [ ! -f "./jq" ]; then
+  curl https://github.com/stedolan/jq/releases/download/jq-1.6/jq-linux64 -o jq
+  chmod +x ./jq
+fi
 echo 'Getting token to get metadata of EC2 instance'
 TOKEN=$(curl -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600")
 echo 'Getting ec2 instance id'
 INSTANCE_ID=$(curl -H "X-aws-ec2-metadata-token: $\{TOKEN\}" -v http://169.254.169.254/latest/meta-data/instance-id)
 echo 'Got instance id $\{INSTANCE_ID\}'
+RUNNER_TOKEN=$(curl -s -XPOST \
+  -H "authorization: token ${githubToken}" \
+  https://api.github.com/repos/wayofthepie/gh-app-test/actions/runners/registration-token |\
+  jq -r .token)
 echo 'Configuring runner'
 ./config.sh \
   --url https://github.com/${config.githubContext.owner}/${config.githubContext.repo} \
-  --token ${githubRegistrationToken} \
+  --token ${githubToken} \
   --labels $\{INSTANCE_ID\} \
   --work _work \
   --ephemeral
@@ -94,10 +110,10 @@ echo 'Starting runner'
   }
 }
 
-async function startEc2Instance(githubRegistrationToken) {
+async function startEc2Instance(githubToken) {
   const ec2 = new AWS.EC2();
 
-  const userData = buildUserDataScript(githubRegistrationToken);
+  const userData = buildUserDataScript(githubToken);
 
   const runParams = {
     ImageId: config.input.ec2ImageId,
