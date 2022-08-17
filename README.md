@@ -153,7 +153,7 @@ Use the following steps to prepare your workflow for running on your EC2 self-ho
 **3. Prepare EC2 image**
 
 1. Create a new EC2 instance based on any Linux distribution you need.
-2. Connect to the instance using SSH, install `docker` and `git`, then enable `docker` service.
+2. Connect to the instance using SSH, install `docker`, `git` and `jq` then enable `docker` service.
 
    For Amazon Linux 2, it looks like the following:
 
