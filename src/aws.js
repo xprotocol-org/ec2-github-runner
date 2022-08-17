@@ -36,16 +36,11 @@ echo Getting ec2 instance id
 INSTANCE_ID=$(curl -H "X-aws-ec2-metadata-token: $\{TOKEN\}" -v http://169.254.169.254/latest/meta-data/instance-id)
 echo Got instance id $INSTANCE_ID
 
-if [ ! -f "./jq" ]; then
-  curl -L https://github.com/stedolan/jq/releases/download/jq-1.6/jq-linux64 -o jq
-  chmod +x ./jq
-fi
-
 echo Getting runner token
 RUNNER_TOKEN=$(curl -s -XPOST \
   -H "authorization: token ${githubToken}" \
   https://api.github.com/repos/${config.githubContext.owner}/${config.githubContext.repo}/actions/runners/registration-token | \
-  ./jq -r .token)
+  jq -r .token)
 if [ -f ".runner" ]; then
   echo Unregistering old runner data
   ./config.sh remove --token $RUNNER_TOKEN
@@ -84,12 +79,13 @@ Content-Disposition: attachment; filename="userdata.txt"
 #!/bin/bash
 export RUNNER_ALLOW_RUNASROOT=1
 if [ ! -d "./actions-runner" ]; then
+  command -v yum >/dev/null 2>&1 && { echo "Installing dependencies with yum"; sudo yum -y install libicu60 jq; }
   echo Installing runner
   mkdir -p actions-runner
   cd actions-runner
   case $(uname -m) in aarch64) ARCH="arm64" ;; amd64|x86_64) ARCH="x64" ;; esac && export RUNNER_ARCH=$\{ARCH\}
-  curl -O -L https://github.com/actions/runner/releases/download/v2.286.0/actions-runner-linux-$\{RUNNER_ARCH\}-2.286.0.tar.gz
-  tar xzf ./actions-runner-linux-$\{RUNNER_ARCH\}-2.286.0.tar.gz
+  curl -O -L https://github.com/actions/runner/releases/download/v2.295.0/actions-runner-linux-$\{RUNNER_ARCH\}-2.295.0.tar.gz
+  tar xzf ./actions-runner-linux-$\{RUNNER_ARCH\}-2.295.0.tar.gz
 else
   cd actions-runner
 fi
@@ -100,16 +96,11 @@ echo Getting ec2 instance id
 INSTANCE_ID=$(curl -H "X-aws-ec2-metadata-token: $\{TOKEN\}" -v http://169.254.169.254/latest/meta-data/instance-id)
 echo Got instance id $INSTANCE_ID
 
-if [ ! -f "./jq" ]; then
-  curl -L https://github.com/stedolan/jq/releases/download/jq-1.6/jq-linux64 -o jq
-  chmod +x ./jq
-fi
-
 echo Getting runner token
 RUNNER_TOKEN=$(curl -s -XPOST \
   -H "authorization: token ${githubToken}" \
   https://api.github.com/repos/${config.githubContext.owner}/${config.githubContext.repo}/actions/runners/registration-token | \
-  ./jq -r .token)
+  jq -r .token)
 if [ -f ".runner" ]; then
   echo Unregistering old runner data
   ./config.sh remove --token $RUNNER_TOKEN
