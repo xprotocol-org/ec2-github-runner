@@ -16,7 +16,7 @@ inputs:
       Specify here if you want to reuse runner. EC2 runner instance
       will be hiberneted and resume if this is true.
     required: true
-    default: 'true'
+    default: 'false'
   github-token:
     description: >-
       GitHub Personal Access Token with the 'repo' scope assigned.
