@@ -79,7 +79,7 @@ Content-Disposition: attachment; filename="userdata.txt"
 #!/bin/bash
 export RUNNER_ALLOW_RUNASROOT=1
 if [ ! -d "./actions-runner" ]; then
-  command -v yum >/dev/null 2>&1 && { echo "Installing dependencies with yum"; sudo yum -y install libicu60 jq; }
+  command -v yum >/dev/null 2>&1 && { echo "Installing dependencies with yum"; sudo yum -y install libicu60 jq docker git; sudo systemctl enable docker.service; sudo systemctl start docker.service; }
   echo Installing runner
   mkdir -p actions-runner
   cd actions-runner
