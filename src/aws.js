@@ -79,12 +79,20 @@ Content-Disposition: attachment; filename="userdata.txt"
 #!/bin/bash
 export RUNNER_ALLOW_RUNASROOT=1
 if [ ! -d "./actions-runner" ]; then
-  command -v yum >/dev/null 2>&1 && { echo "Installing dependencies with yum"; sudo yum -y install libicu60 jq docker git; sudo systemctl enable docker.service; sudo systemctl start docker.service; }
+  command -v yum >/dev/null 2>&1 \
+    && { echo "Installing dependencies with yum"; \
+      sudo yum -y install libicu60 jq git; }
+  command -v apt-get >/dev/null 2>&1 \
+    && { echo "Installing dependencies with apt-get"; \
+      sudo apt-get install -y jq git; }
+  curl -fsSL https://get.docker.com -o get-docker.sh; \
+    sudo sh get-docker.sh;
   echo Installing runner
   mkdir -p actions-runner
   cd actions-runner
-  case $(uname -m) in aarch64) ARCH="arm64" ;; amd64|x86_64) ARCH="x64" ;; esac && export RUNNER_ARCH=$\{ARCH\}
-  curl -O -L https://github.com/actions/runner/releases/download/v2.295.0/actions-runner-linux-$\{RUNNER_ARCH\}-2.295.0.tar.gz
+  case $(uname) in Darwin) OS="osx" ;; Linux) OS="linux" ;; esac && export RUNNER_OS=$\{OS\}
+  case $(uname -m) in aarch64|arm64) ARCH="arm64" ;; amd64|x86_64) ARCH="x64" ;; esac && export RUNNER_ARCH=$\{ARCH\}
+  curl -O -L https://github.com/actions/runner/releases/download/v2.295.0/actions-runner-$\{RUNNER_OS\}-$\{RUNNER_ARCH\}-2.295.0.tar.gz
   tar xzf ./actions-runner-linux-$\{RUNNER_ARCH\}-2.295.0.tar.gz
 else
   cd actions-runner
