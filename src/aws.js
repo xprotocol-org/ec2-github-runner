@@ -137,6 +137,16 @@ async function startEc2Instance(githubToken) {
     InstanceType: config.input.ec2InstanceType,
     MinCount: 1,
     MaxCount: 1,
+    BlockDeviceMappings: [
+      {
+        DeviceName: '/dev/sda1',
+        Ebs: {
+          DeleteOnTermination: true,
+          VolumeSize: 32,
+          VolumeType: 'gp2',
+        },
+      },
+    ],
     UserData: Buffer.from(userData).toString('base64'),
     SubnetId: config.input.subnetId,
     SecurityGroupIds: [config.input.securityGroupId],
