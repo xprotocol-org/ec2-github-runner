@@ -169,7 +169,11 @@ async function startEc2Instance(githubToken) {
       tagsFilters.push({ Name: `tag:${tag.Key}`, Values: [tag.Value] });
     }
     const describeParams = {
-      Filters: [...tagsFilters, { Name: 'instance-state-name', Values: ['stopped'] }],
+      Filters: [
+        ...tagsFilters,
+        { Name: 'instance-state-name', Values: ['stopped'] },
+        { Name: 'instance-type', Values: [config.input.ec2InstanceType] },
+      ],
     };
 
     core.info(`Checking for stopped instance with filter ${JSON.stringify(describeParams)}`);
