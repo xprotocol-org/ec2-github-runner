@@ -17,6 +17,11 @@ inputs:
       will be hiberneted and resume if this is true.
     required: true
     default: 'false'
+  runner-count:
+    description: >-
+      Specify the number of runners in one EC2 instance that you want.
+    required: false
+    default: '1'
   github-token:
     description: >-
       GitHub Personal Access Token with the 'repo' scope assigned.
