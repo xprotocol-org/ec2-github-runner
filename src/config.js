@@ -12,8 +12,8 @@ class Config {
       securityGroupId: core.getInput('security-group-id'),
       ec2InstanceId: core.getInput('ec2-instance-id'),
       iamRoleName: core.getInput('iam-role-name'),
-      runnerHomeDir: core.getInput('runner-home-dir'),
       reuseRunner: core.getInput('reuse-runner'),
+      runnerCount: core.getInput('runner-count'),
     };
 
     const jsonTags = JSON.parse(core.getInput('aws-resource-tags'));

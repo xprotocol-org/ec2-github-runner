@@ -3,15 +3,16 @@ const gh = require('./gh');
 const config = require('./config');
 const core = require('@actions/core');
 
-function setOutput(ec2InstanceId) {
-  core.setOutput('ec2-instance-id', ec2InstanceId);
+function setOutput(runnersInfo) {
+  core.setOutput('ec2-instance-id', runnersInfo.instanceId);
+  core.setOutput('runners', runnersInfo.runners);
 }
 
 async function start() {
-  const ec2InstanceId = await aws.startEc2Instance(config.input.githubToken);
-  setOutput(ec2InstanceId);
-  await aws.waitForInstanceRunning(ec2InstanceId);
-  await gh.waitForRunnerRegistered(ec2InstanceId);
+  const runnersInfo = await aws.startEc2Instance(config.input.githubToken);
+  setOutput(runnersInfo);
+  await aws.waitForInstanceRunning(runnersInfo);
+  await gh.waitForRunnerRegistered(runnersInfo);
 }
 
 async function stop() {
