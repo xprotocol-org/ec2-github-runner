@@ -68,7 +68,9 @@ async function waitForRunnerRegistered(runnersInfo) {
       }
 
       core.info(`Found runners ${JSON.stringify(runners)}`);
-      const readyRunners = runners.filter((runner) => runnersInfo.runners.indexOf(runner.name) >= 0).filter((runner) => runner.status === 'online');
+      const readyRunners = runners
+        .filter((runner) => runnersInfo.runners.indexOf(runner.name) >= 0)
+        .filter((runner) => runner.status === 'online' && runner.busy === false);
       core.info(`Found ready runners ${JSON.stringify(readyRunners)}`);
       if (readyRunners.length < config.input.runnerCount) {
         core.info('Not all runners are ready. Waiting...');
