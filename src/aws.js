@@ -46,9 +46,8 @@ function start_runner {
   ./config.sh \
     --url https://github.com/${config.githubContext.owner}/${config.githubContext.repo} \
     --token $RUNNER_TOKEN \
-    --labels "$\{INSTANCE_ID\},$\{INSTANCE_ID\}_runner_$\{1\}" \
-    --name "$\{INSTANCE_ID\}_runner_$\{1\}" \
-    --work _work
+    --labels "$\{INSTANCE_ID\},runner_$\{1\}" \
+    --name "$\{INSTANCE_ID\}_runner_$\{1\}"
 
   echo "Starting runner"
   ./run.sh
