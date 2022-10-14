@@ -46,7 +46,7 @@ function start_runner {
   ./config.sh \
     --url https://github.com/${config.githubContext.owner}/${config.githubContext.repo} \
     --token $RUNNER_TOKEN \
-    --labels "$\{INSTANCE_ID\},runner_$\{1\}" \
+    --labels "$\{INSTANCE_ID\},$\{INSTANCE_ID\}_runner_$\{1\}" \
     --name "$\{INSTANCE_ID\}_runner_$\{1\}"
 
   echo "Starting runner"
@@ -110,7 +110,7 @@ async function startEc2Instance(githubToken) {
         DeviceName: '/dev/sda1',
         Ebs: {
           DeleteOnTermination: true,
-          VolumeSize: 32,
+          VolumeSize: 30,
           VolumeType: 'gp2',
         },
       },
@@ -123,7 +123,14 @@ async function startEc2Instance(githubToken) {
       { ResourceType: 'instance', Tags: config.tagSpecifications },
       { ResourceType: 'volume', Tags: config.tagSpecifications },
     ],
-    InstanceInitiatedShutdownBehavior: 'stop',
+    InstanceInitiatedShutdownBehavior: config.input.reuseRunner === 'true' ? 'stop' : 'terminate',
+    InstanceMarketOptions: {
+      MarketType: 'spot',
+      SpotOptions: {
+        InstanceInterruptionBehavior: config.input.reuseRunner === 'true' ? 'stop' : 'terminate',
+        SpotInstanceType: config.input.reuseRunner === 'true' ? 'persistent' : 'one-time',
+      },
+    },
   };
 
   const startParams = {
@@ -160,13 +167,21 @@ async function startEc2Instance(githubToken) {
     }
   }
 
-  try {
-    if (config.input.reuseRunner === 'true' && startParams.InstanceIds.length > 0) {
+  if (config.input.reuseRunner === 'true' && startParams.InstanceIds.length > 0) {
+    try {
       const result = await ec2.startInstances(startParams);
       const ec2InstanceId = result.StartingInstances[0].InstanceId;
       core.info(`AWS EC2 instance ${ec2InstanceId} is starting`);
       return getRunnersInfo(ec2InstanceId);
+    } catch (error) {
+      core.warning('AWS EC2 instance starting error');
+      core.warning(`${error.name}: ${error.message}`);
+      if (error.name.indexOf('IncorrectSpotRequestState') < 0) {
+        throw error;
+      }
     }
+  }
+  try {
     const result = await ec2.runInstances(runParams);
     const ec2InstanceId = result.Instances[0].InstanceId;
     core.info(`AWS EC2 instance ${ec2InstanceId} is starting`);
