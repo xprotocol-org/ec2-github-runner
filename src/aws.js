@@ -105,6 +105,35 @@ function getRunnersInfo(instanceId) {
   return info;
 }
 
+async function runEc2Instance(runParams) {
+  const ec2 = new AWS.EC2();
+
+  let error = new Error('Fallback runEc2Instance error'); // this should never be thrown
+
+  const subnets = config.subnets;
+  for(var i = subnets.length-1; i >= 0; i--) {
+    const subnet = subnets.splice(Math.floor(Math.random() * subnets.length), 1)[0];
+    core.info(`Attempting to start EC2 instance in subnet ${subnet}`);
+    runParams.SubnetId = subnet;
+
+    try {
+      const result = await ec2.runInstances(runParams);
+      const ec2InstanceId = result.Instances[0].InstanceId;
+      core.info(`AWS EC2 instance ${ec2InstanceId} is starting`);
+      return getRunnersInfo(ec2InstanceId);
+    }
+    catch (e) {
+      if (e.name != 'InsufficientInstanceCapacity')
+        throw e;
+
+      core.warning(`Got InsufficientInstanceCapacity while attempting to start EC2 instance in subnet ${subnet}`);
+      error = e;
+    }
+  }
+
+  throw error;
+}
+
 async function startEc2Instance(githubToken) {
   const ec2 = new AWS.EC2();
 
@@ -126,7 +155,6 @@ async function startEc2Instance(githubToken) {
       },
     ],
     UserData: Buffer.from(userData).toString('base64'),
-    SubnetId: config.input.subnetId,
     SecurityGroupIds: [config.input.securityGroupId],
     IamInstanceProfile: { Name: config.input.iamRoleName },
     TagSpecifications: [
@@ -191,12 +219,22 @@ async function startEc2Instance(githubToken) {
       }
     }
   }
+
   try {
-    const result = await ec2.runInstances(runParams);
-    const ec2InstanceId = result.Instances[0].InstanceId;
-    core.info(`AWS EC2 instance ${ec2InstanceId} is starting`);
-    return getRunnersInfo(ec2InstanceId);
+      return runEc2Instance(runParams);
   } catch (error) {
+    if (error.name == 'InsufficientInstanceCapacity') {
+      core.warning("Got InsufficientInstanceCapacity error while starting EC2 instance with spot request, attempting on-demand request instead");
+      delete runParams.InstanceMarketOptions;
+
+      try {
+        return runEc2Instance(runParams);
+      } catch (e) {
+        core.error('AWS EC2 instance starting error');
+        throw e;
+      }
+    }
+
     core.error('AWS EC2 instance starting error');
     throw error;
   }
