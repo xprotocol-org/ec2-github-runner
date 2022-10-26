@@ -17,7 +17,7 @@ class Config {
     };
 
     const jsonTags = JSON.parse(core.getInput('aws-resource-tags'));
-    this.tagSpecifications = [];
+    this.tagSpecifications = [{ Key: 'runner-count', Value: core.getInput('runner-count') }];
     for (const [key, value] of Object.entries(jsonTags)) {
       this.tagSpecifications.push({ Key: key, Value: value });
     }
