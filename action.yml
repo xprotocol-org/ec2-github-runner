@@ -66,10 +66,6 @@ inputs:
       for example: '{"TagKey1": "TagValue1", "TagKey2": "TagValue2"}'
     required: false
     default: '{}'
-  runner-home-dir:
-    description: >-
-      Directory that contains actions-runner software and scripts. E.g. /home/runner/actions-runner.
-    required: false
 outputs:
   ec2-instance-id:
     description: >-
