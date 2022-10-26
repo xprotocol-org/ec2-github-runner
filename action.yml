@@ -38,13 +38,14 @@ inputs:
     required: false
   subnet-id:
     description: >-
-      VPC Subnet Id. The subnet should belong to the same VPC as the specified security group.
+      VPC Subnet Id(s). The subnet(s) should belong to the same VPC as the specified security group.
+      Multiple Subnet IDs can be specified as a JSON array for capacity fallback
       This input is required if you use the 'start' mode.
     required: false
   security-group-id:
     description: >-
       EC2 Security Group Id. 
-      The security group should belong to the same VPC as the specified subnet.
+      The security group should belong to the same VPC as the specified subnet(s).
       The runner doesn't require any inbound traffic. However, outbound traffic should be allowed.
       This input is required if you use the 'start' mode.
     required: false
