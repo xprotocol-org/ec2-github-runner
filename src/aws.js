@@ -221,14 +221,14 @@ async function startEc2Instance(githubToken) {
   }
 
   try {
-      return runEc2Instance(runParams);
+      return await runEc2Instance(runParams);
   } catch (error) {
     if (error.name == 'InsufficientInstanceCapacity') {
       core.warning("Got InsufficientInstanceCapacity error while starting EC2 instance with spot request, attempting on-demand request instead");
       delete runParams.InstanceMarketOptions;
 
       try {
-        return runEc2Instance(runParams);
+        return await runEc2Instance(runParams);
       } catch (e) {
         core.error('AWS EC2 instance starting error');
         throw e;
