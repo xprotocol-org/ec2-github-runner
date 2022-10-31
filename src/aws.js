@@ -110,7 +110,8 @@ async function runEc2Instance(runParams) {
 
   let error = new Error('Fallback runEc2Instance error'); // this should never be thrown
 
-  const subnets = config.subnets;
+  const subnets = Object.values(config.subnets);
+
   for(var i = subnets.length-1; i >= 0; i--) {
     const subnet = subnets.splice(Math.floor(Math.random() * subnets.length), 1)[0];
     core.info(`Attempting to start EC2 instance in subnet ${subnet}`);
