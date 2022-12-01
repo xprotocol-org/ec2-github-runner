@@ -4,7 +4,7 @@ const config = require('./config');
 
 // User data scripts are run as the root user
 /* eslint-disable no-useless-escape */
-function buildUserDataScript(githubToken, runnerCount) {
+function buildUserDataScript(githubToken, runnerCount, generalLabels) {
   return `Content-Type: multipart/mixed; boundary="//"
 MIME-Version: 1.0
 
@@ -49,7 +49,7 @@ function start_runner {
   su -p "action-user" -c bash -c './config.sh \
     --url https://github.com/${config.githubContext.owner}/${config.githubContext.repo} \
     --token $\{RUNNER_TOKEN\} \
-    --labels "$\{INSTANCE_ID\},$\{RUNNER_NAME\}" \
+    --labels "$\{INSTANCE_ID\},$\{RUNNER_NAME\},${generalLabels}" \
     --name "$\{RUNNER_NAME\}"'
 
   echo "Starting runner"
@@ -107,8 +107,16 @@ function getRunnersInfo(instanceId) {
 
 async function startEc2Instance(githubToken) {
   const ec2 = new AWS.EC2();
+  const tagsFilters = [];
+  let instanceId = null;
+  const generalLabels = [];
 
-  const userData = buildUserDataScript(githubToken, config.input.runnerCount);
+  for (const tag of config.tagSpecifications) {
+    tagsFilters.push({ Name: `tag:${tag.Key}`, Values: [tag.Value] });
+    generalLabels.push(tag.Value);
+  }
+
+  const userData = buildUserDataScript(githubToken, config.input.runnerCount, generalLabels.join(','));
 
   const runParams = {
     ImageId: config.input.ec2ImageId,
@@ -147,12 +155,6 @@ async function startEc2Instance(githubToken) {
     InstanceIds: [],
   };
   if (config.input.reuseRunner === 'true') {
-    const tagsFilters = [];
-    let instanceId = null;
-
-    for (const tag of config.tagSpecifications) {
-      tagsFilters.push({ Name: `tag:${tag.Key}`, Values: [tag.Value] });
-    }
     const describeParams = {
       Filters: [
         ...tagsFilters,
@@ -186,20 +188,43 @@ async function startEc2Instance(githubToken) {
     } catch (error) {
       core.warning('AWS EC2 instance starting error');
       core.warning(`${error.name}: ${error.message}`);
-      if (error.name.indexOf('IncorrectSpotRequestState') < 0) {
+      if (error.name.indexOf('InsufficientInstanceCapacity') >= 0) {
+        delete runParams.InstanceMarketOptions;
+      } else if (error.name.indexOf('IncorrectSpotRequestState') >= 0) {
+        runParams.InstanceInitiatedShutdownBehavior = 'terminate';
+        runParams.InstanceMarketOptions = {
+          MarketType: 'spot',
+          SpotOptions: {
+            InstanceInterruptionBehavior: 'terminate',
+            SpotInstanceType: 'one-time',
+          },
+        };
+      } else {
         throw error;
       }
     }
   }
-  try {
-    const result = await ec2.runInstances(runParams);
-    const ec2InstanceId = result.Instances[0].InstanceId;
-    core.info(`AWS EC2 instance ${ec2InstanceId} is starting`);
-    return getRunnersInfo(ec2InstanceId);
-  } catch (error) {
-    core.error('AWS EC2 instance starting error');
-    throw error;
+
+  let lastError = null;
+  for (let i = 0; i < 2; i++) {
+    try {
+      const result = await ec2.runInstances(runParams);
+      const ec2InstanceId = result.Instances[0].InstanceId;
+      core.info(`AWS EC2 instance ${ec2InstanceId} is starting`);
+      return getRunnersInfo(ec2InstanceId);
+    } catch (error) {
+      core.warning('AWS EC2 instance starting error');
+      core.warning(`${error.name}: ${error.message}`);
+      lastError = error;
+      if (error.name.indexOf('InsufficientInstanceCapacity') >= 0) {
+        delete runParams.InstanceMarketOptions;
+        continue;
+      }
+      throw error;
+    }
   }
+
+  throw lastError;
 }
 
 async function terminateEc2Instance() {
@@ -215,13 +240,16 @@ async function terminateEc2Instance() {
       core.info(`AWS EC2 instance ${config.input.ec2InstanceId} is stopped`);
       return;
     }
-    await ec2.terminateInstances(params);
-    core.info(`AWS EC2 instance ${config.input.ec2InstanceId} is terminated`);
-    return;
   } catch (error) {
-    core.error(`AWS EC2 instance ${config.input.ec2InstanceId} termination error`);
-    throw error;
+    core.warning(`AWS EC2 instance ${config.input.ec2InstanceId} termination error`);
+    core.warning(`${error.name}: ${error.message}`);
+    if (error.name.indexOf('UnsupportedOperation') < 0) {
+      throw error;
+    }
   }
+
+  await ec2.terminateInstances(params);
+  core.info(`AWS EC2 instance ${config.input.ec2InstanceId} is terminated`);
 }
 
 async function waitForInstanceRunning(runnersInfo) {
@@ -235,7 +263,6 @@ async function waitForInstanceRunning(runnersInfo) {
   try {
     await AWS.waitUntilInstanceRunning({ client: ec2, maxWaitTime: 300 }, params);
     core.info(`AWS EC2 instance ${ec2InstanceId} is up and running`);
-    return;
   } catch (error) {
     core.error(`AWS EC2 instance ${ec2InstanceId} initialization error`);
     throw error;
