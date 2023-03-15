@@ -57,6 +57,7 @@ function start_runner {
 }
 
 export HOME="/home/action-user"
+export RUNNER_VERSION="2.303.0"
 if [ ! -d "$\{HOME\}/actions-runner" ]; then
   mkdir -p $HOME
   groupadd "action-user"
@@ -79,10 +80,10 @@ if [ ! -d "$\{HOME\}/actions-runner" ]; then
   cd $\{HOME\}/actions-runner
   case $(uname) in Darwin) OS="osx" ;; Linux) OS="linux" ;; esac && export RUNNER_OS=$\{OS\}
   case $(uname -m) in aarch64|arm64) ARCH="arm64" ;; amd64|x86_64) ARCH="x64" ;; esac && export RUNNER_ARCH=$\{ARCH\}
-  curl -O -L "https://github.com/actions/runner/releases/download/v2.299.1/actions-runner-$\{RUNNER_OS\}-$\{RUNNER_ARCH\}-2.299.1.tar.gz"
+  curl -O -L "https://github.com/actions/runner/releases/download/v$\{RUNNER_VERSION\}/actions-runner-$\{RUNNER_OS\}-$\{RUNNER_ARCH\}-$\{RUNNER_VERSION\}.tar.gz"
   for i in $(seq 1 ${runnerCount}); do
     mkdir -p "$\{HOME\}/actions-runner/runner_$\{i\}"
-    tar xzf "./actions-runner-linux-$\{RUNNER_ARCH\}-2.299.1.tar.gz" -C "$\{HOME\}/actions-runner/runner_$\{i\}"
+    tar xzf "./actions-runner-linux-$\{RUNNER_ARCH\}-$\{RUNNER_VERSION\}.tar.gz" -C "$\{HOME\}/actions-runner/runner_$\{i\}"
   done
   chown -R "action-user:action-user" $HOME
 fi
