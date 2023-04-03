@@ -70,8 +70,9 @@ if [ ! -d "$\{HOME\}/actions-runner" ]; then
     && { echo "Installing dependencies with apt-get"; \
       sudo apt-get update -qq >/dev/null; \
       sudo apt-get install -y jq git; }
-  curl -fsSL https://get.docker.com -o get-docker.sh; \
-    sudo sh get-docker.sh;
+  command -v docker \
+  || { curl -fsSL https://get.docker.com -o get-docker.sh; \
+      sudo sh get-docker.sh; }
   echo "Setup docker for non-root user"
   groupadd docker
   usermod -aG docker "action-user"
