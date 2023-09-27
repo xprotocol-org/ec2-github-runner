@@ -58,18 +58,21 @@ function start_runner {
 }
 
 export ACTION_HOME="/home/action-user"
-export RUNNER_VERSION="2.303.0"
+export RUNNER_VERSION="2.309.0"
 if [ ! -d "$\{ACTION_HOME\}/actions-runner" ]; then
   groupadd "action-user"
   useradd -m -d $ACTION_HOME -s $(which bash) -g "action-user" "action-user"
   echo "action-user ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers.d/action-user-sudo-no-passwd
   command -v yum >/dev/null 2>&1 \
     && { echo "Installing dependencies with yum"; \
-      sudo yum -y install libicu60 jq git; }
+      sudo yum -y install libicu60; \
+      command -v jq >/dev/null 2>&1 || sudo yum -y install jq; \
+      command -v git >/dev/null 2>&1 || sudo yum -y install git; }
   command -v apt-get >/dev/null 2>&1 \
     && { echo "Installing dependencies with apt-get"; \
       sudo apt-get update -qq >/dev/null; \
-      sudo apt-get install -y jq git; }
+      command -v jq >/dev/null 2>&1 || sudo apt-get install -y jq; \
+      command -v git >/dev/null 2>&1 || sudo apt-get install -y git; }
   command -v docker \
   || { curl -fsSL https://get.docker.com -o get-docker.sh; \
       sudo sh get-docker.sh; }
