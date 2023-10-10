@@ -51,7 +51,9 @@ function start_runner {
     --url https://github.com/${config.githubContext.owner}/${config.githubContext.repo} \
     --token $\{RUNNER_TOKEN\} \
     --labels "$\{INSTANCE_ID\},$\{RUNNER_NAME\},${generalLabels}" \
-    --name "$\{RUNNER_NAME\}"'
+    --name "$\{RUNNER_NAME\}" \
+    --unattended \
+    --replace'
 
   echo "Starting runner"
   su - "action-user" -w RUNNER_HOME -c bash -c "cd $\{RUNNER_HOME\} && ./run.sh"
