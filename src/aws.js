@@ -28,7 +28,7 @@ Content-Disposition: attachment; filename="userdata.txt"
 set -x
 
 function start_runner {
-  RUNNER_HOME="$\{ACTION_HOME\}/actions-runner/runner_$\{1\}"
+  RUNNER_HOME="$\{ACTION_HOME\}/runner_$\{1\}"
   cd $RUNNER_HOME
   echo "Getting token to get metadata of EC2 instance"
   TOKEN=$(curl -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600")
@@ -61,7 +61,13 @@ function start_runner {
 
 export ACTION_HOME="/home/action-user"
 export RUNNER_VERSION="2.309.0"
-if [ ! -d "$\{ACTION_HOME\}/actions-runner" ]; then
+case $(uname) in Darwin) OS="osx" ;; Linux) OS="linux" ;; esac && export RUNNER_OS=$\{OS\}
+case $(uname -m) in aarch64|arm64) ARCH="arm64" ;; amd64|x86_64) ARCH="x64" ;; esac && export RUNNER_ARCH=$\{ARCH\}
+if [ ! -f /var/lib/actions-runner.tar.gz ]; then
+curl -L "https://github.com/actions/runner/releases/download/v$\{RUNNER_VERSION\}/actions-runner-$\{RUNNER_OS\}-$\{RUNNER_ARCH\}-$\{RUNNER_VERSION\}.tar.gz" \
+  -o /var/lib/actions-runner.tar.gz
+fi
+if [ ! -d "$\{ACTION_HOME\}" ]; then
   groupadd "action-user"
   useradd -m -d $ACTION_HOME -s $(which bash) -g "action-user" "action-user"
   echo "action-user ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers.d/action-user-sudo-no-passwd
@@ -82,14 +88,9 @@ if [ ! -d "$\{ACTION_HOME\}/actions-runner" ]; then
   groupadd docker
   usermod -aG docker "action-user"
   echo "Installing runner"
-  mkdir -p $\{ACTION_HOME\}/actions-runner
-  cd $\{ACTION_HOME\}/actions-runner
-  case $(uname) in Darwin) OS="osx" ;; Linux) OS="linux" ;; esac && export RUNNER_OS=$\{OS\}
-  case $(uname -m) in aarch64|arm64) ARCH="arm64" ;; amd64|x86_64) ARCH="x64" ;; esac && export RUNNER_ARCH=$\{ARCH\}
-  curl -O -L "https://github.com/actions/runner/releases/download/v$\{RUNNER_VERSION\}/actions-runner-$\{RUNNER_OS\}-$\{RUNNER_ARCH\}-$\{RUNNER_VERSION\}.tar.gz"
   for i in $(seq 1 ${runnerCount}); do
-    mkdir -p "$\{ACTION_HOME\}/actions-runner/runner_$\{i\}"
-    tar xzf "./actions-runner-linux-$\{RUNNER_ARCH\}-$\{RUNNER_VERSION\}.tar.gz" -C "$\{ACTION_HOME\}/actions-runner/runner_$\{i\}"
+    mkdir -p "$\{ACTION_HOME\}/runner_$\{i\}"
+    tar xzf "/var/lib/actions-runner.tar.gz" -C "$\{ACTION_HOME\}/runner_$\{i\}"
   done
   chown -R "action-user:action-user" $ACTION_HOME
 fi
