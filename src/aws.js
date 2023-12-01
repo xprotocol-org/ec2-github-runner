@@ -168,6 +168,7 @@ async function startEc2Instance(githubToken) {
         ...tagsFilters,
         { Name: 'instance-state-name', Values: ['stopped'] },
         { Name: 'instance-type', Values: [config.input.ec2InstanceType] },
+        { Name: 'image-id', Values: [config.input.ec2ImageId] },
       ],
     };
 
@@ -175,7 +176,11 @@ async function startEc2Instance(githubToken) {
 
     try {
       const result = await ec2.describeInstances(describeParams);
-      if (result.Reservations !== null && result.Reservations.length > 0 && result.Reservations[0].Instances[0].State.Name !== 'terminated') {
+      if (
+        result.Reservations !== null &&
+        result.Reservations.length > 0 &&
+        result.Reservations[0].Instances[0].State.Name !== 'terminated'
+      ) {
         instanceId = result.Reservations[0].Instances[0].InstanceId;
       }
       if (instanceId !== null && instanceId !== undefined) {
