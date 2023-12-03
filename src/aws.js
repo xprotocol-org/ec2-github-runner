@@ -261,6 +261,20 @@ async function terminateEc2Instance() {
     }
   }
 
+  const spotRequestQuery = {
+    Filters: [{ Name: 'instance-id', Value: [config.input.ec2InstanceId] }],
+  };
+  const result = await ec2.describeSpotInstanceRequests(spotRequestQuery);
+  if (result.SpotInstanceRequests !== null && result.SpotInstanceRequests.length > 0) {
+    const spotCancelRequest = {
+      SpotInstanceRequestIds: result.SpotInstanceRequests.map((x) => x.SpotInstanceRequestId),
+    };
+
+    await ec2.cancelSpotInstanceRequests(spotCancelRequest);
+    core.info(`AWS EC2 instance ${config.input.ec2InstanceId} is terminated along with its spot request`);
+    return;
+  }
+
   await ec2.terminateInstances(params);
   core.info(`AWS EC2 instance ${config.input.ec2InstanceId} is terminated`);
 }
