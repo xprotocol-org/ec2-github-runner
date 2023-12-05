@@ -133,11 +133,11 @@ async function startEc2Instance(githubToken) {
     MaxCount: 1,
     BlockDeviceMappings: [
       {
-        DeviceName: '/dev/sda1',
+        DeviceName: config.input.ec2VolumeMountPoint,
         Ebs: {
           DeleteOnTermination: true,
-          VolumeSize: 30,
-          VolumeType: 'gp2',
+          VolumeSize: config.input.ec2VolumeSize,
+          VolumeType: 'gp3',
         },
       },
     ],

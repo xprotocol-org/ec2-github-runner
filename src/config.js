@@ -8,6 +8,8 @@ class Config {
       githubToken: core.getInput('github-token'),
       ec2ImageId: core.getInput('ec2-image-id'),
       ec2InstanceType: core.getInput('ec2-instance-type'),
+      ec2VolumeSize: core.getInput('ec2-volume-size'),
+      ec2VolumeMountPoint: core.getInput('ec2-volume-mount-point'),
       subnetId: core.getInput('subnet-id'),
       securityGroupId: core.getInput('security-group-id'),
       ec2InstanceId: core.getInput('ec2-instance-id'),
@@ -43,7 +45,12 @@ class Config {
     }
 
     if (this.input.mode === 'start') {
-      if (!this.input.ec2ImageId || !this.input.ec2InstanceType || !this.input.subnetId || !this.input.securityGroupId) {
+      if (
+        !this.input.ec2ImageId ||
+        !this.input.ec2InstanceType ||
+        !this.input.subnetId ||
+        !this.input.securityGroupId
+      ) {
         throw new Error(`Not all the required inputs are provided for the 'start' mode`);
       }
     } else if (this.input.mode === 'stop') {

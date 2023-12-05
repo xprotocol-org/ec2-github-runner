@@ -2,8 +2,8 @@ name: On-demand self-hosted AWS EC2 runner for GitHub Actions
 description: GitHub Action for automatic creation and registration AWS EC2 instance as a GitHub Actions self-hosted runner.
 author: Volodymyr Machula
 branding:
-  icon: 'box'
-  color: 'orange'
+  icon: "box"
+  color: "orange"
 inputs:
   mode:
     description: >-
@@ -16,12 +16,12 @@ inputs:
       Specify here if you want to reuse runner. EC2 runner instance
       will be hiberneted and resume if this is true.
     required: true
-    default: 'false'
+    default: "false"
   runner-count:
     description: >-
       Specify the number of runners in one EC2 instance that you want.
     required: false
-    default: '1'
+    default: "1"
   github-token:
     description: >-
       GitHub Personal Access Token with the 'repo' scope assigned.
@@ -36,6 +36,18 @@ inputs:
       EC2 Instance Type. 
       This input is required if you use the 'start' mode.
     required: false
+  ec2-volume-size:
+    description: >-
+      EC2 Volume Size. 
+      This input will default to 30.
+    required: false
+    default: "30"
+  ec2-volume-mount-point:
+    description: >-
+      EC2 Volume Mount Point. 
+      This input will default to /dev/sda1
+    required: false
+    default: "/dev/sda1"
   subnet-id:
     description: >-
       VPC Subnet Id. The subnet should belong to the same VPC as the specified security group.
@@ -65,12 +77,12 @@ inputs:
       This must be a stringified array of AWS Tag objects, with both Key and Value fields,
       for example: '{"TagKey1": "TagValue1", "TagKey2": "TagValue2"}'
     required: false
-    default: '{}'
+    default: "{}"
 outputs:
   ec2-instance-id:
     description: >-
       EC2 Instance Id of the created runner.
       The id is used to terminate the EC2 instance when the runner is not needed anymore.
 runs:
-  using: 'node16'
-  main: './dist/index.js'
+  using: "node16"
+  main: "./dist/index.js"
