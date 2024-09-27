@@ -28,7 +28,7 @@ Content-Disposition: attachment; filename="userdata.txt"
 set -x
 
 function start_runner {
-  RUNNER_HOME="$\{ACTION_HOME\}/runner_$\{1\}"
+  export RUNNER_HOME="$\{ACTION_HOME\}/runner_$\{1\}"
   cd $RUNNER_HOME
   echo "Getting token to get metadata of EC2 instance"
   TOKEN=$(curl -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600")
@@ -56,11 +56,11 @@ function start_runner {
     --replace'
 
   echo "Starting runner"
-  su - "action-user" -w RUNNER_HOME -c bash -c "cd $\{RUNNER_HOME\} && ./run.sh"
+  su -l "action-user" -c RUNNER_HOME=$RUNNER_HOME bash -c "cd $\{RUNNER_HOME\} && ./run.sh"
 }
 
 export ACTION_HOME="/home/action-user"
-export RUNNER_VERSION="2.309.0"
+export RUNNER_VERSION="2.319.1"
 case $(uname) in Darwin) OS="osx" ;; Linux) OS="linux" ;; esac && export RUNNER_OS=$\{OS\}
 case $(uname -m) in aarch64|arm64) ARCH="arm64" ;; amd64|x86_64) ARCH="x64" ;; esac && export RUNNER_ARCH=$\{ARCH\}
 if [ ! -f /var/lib/actions-runner.tar.gz ]; then
@@ -73,7 +73,6 @@ if [ ! -d "$\{ACTION_HOME\}" ]; then
   echo "action-user ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers.d/action-user-sudo-no-passwd
   command -v yum >/dev/null 2>&1 \
     && { echo "Installing dependencies with yum"; \
-      sudo yum -y install libicu60; \
       command -v jq >/dev/null 2>&1 || sudo yum -y install jq; \
       command -v git >/dev/null 2>&1 || sudo yum -y install git; }
   command -v apt-get >/dev/null 2>&1 \
