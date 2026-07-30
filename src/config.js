@@ -15,13 +15,27 @@ class Config {
       ec2InstanceId: core.getInput('ec2-instance-id'),
       iamRoleName: core.getInput('iam-role-name'),
       reuseRunner: core.getInput('reuse-runner'),
+      maxReusableInstances: core.getInput('max-reusable-instances') !== '' ? parseInt(core.getInput('max-reusable-instances'), 10) : 2,
       runnerCount: core.getInput('runner-count'),
     };
 
-    const jsonTags = JSON.parse(core.getInput('aws-resource-tags'));
-    this.tagSpecifications = [{ Key: 'runner-count', Value: core.getInput('runner-count') }];
+    let jsonTags = {};
+    const tagsInput = core.getInput('aws-resource-tags');
+    if (tagsInput) {
+      try {
+        const parsed = JSON.parse(tagsInput);
+        if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+          jsonTags = parsed;
+        } else {
+          core.warning(`aws-resource-tags input is not a JSON object, ignoring custom tags.`);
+        }
+      } catch (e) {
+        core.warning(`Failed to parse aws-resource-tags as JSON: ${e.message}`);
+      }
+    }
+    this.tagSpecifications = [{ Key: 'runner-count', Value: core.getInput('runner-count') || '1' }];
     for (const [key, value] of Object.entries(jsonTags)) {
-      this.tagSpecifications.push({ Key: key, Value: value });
+      this.tagSpecifications.push({ Key: key, Value: String(value) });
     }
 
     // the values of github.context.repo.owner and github.context.repo.repo are taken from

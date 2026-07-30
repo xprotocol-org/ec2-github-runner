@@ -161202,10 +161202,30 @@ function wrappy (fn, cb) {
 const AWS = __nccwpck_require__(73802);
 const core = __nccwpck_require__(42186);
 const config = __nccwpck_require__(34570);
+const gh = __nccwpck_require__(56989);
+
+const TAG_REUSE_RUNNER = 'ReuseRunner';
+const TAG_RUNNER_STATUS = 'RunnerStatus';
+const RUNNER_STATUS_ONLINE = 'online';
 
 // User data scripts are run as the root user
 /* eslint-disable no-useless-escape */
-function buildUserDataScript(githubToken, runnerCount, generalLabels) {
+function buildUserDataScript(githubToken, runnerCount, generalLabels, runnerVersion = '2.336.0', awsCreds = null, awsRegion = '') {
+  let awsCredsEnv = '';
+  if (awsCreds && awsCreds.accessKeyId && awsCreds.secretAccessKey) {
+    awsCredsEnv = `
+          # EXPORT_GH_TOKEN="${githubToken}"
+          # EXPORT_AWS_ACCESS_KEY_ID="${awsCreds.accessKeyId}"
+          # EXPORT_AWS_SECRET_ACCESS_KEY="${awsCreds.secretAccessKey}"
+          # EXPORT_AWS_SESSION_TOKEN="${awsCreds.sessionToken || ''}"
+          export AWS_ACCESS_KEY_ID="${awsCreds.accessKeyId}"
+          export AWS_SECRET_ACCESS_KEY="${awsCreds.secretAccessKey}"
+          ${awsCreds.sessionToken ? `export AWS_SESSION_TOKEN="${awsCreds.sessionToken}"` : ''}`;
+  } else {
+    awsCredsEnv = `
+          # EXPORT_GH_TOKEN="${githubToken}"`;
+  }
+
   return `Content-Type: multipart/mixed; boundary="//"
 MIME-Version: 1.0
 
@@ -161232,41 +161252,102 @@ function start_runner {
   export RUNNER_HOME="$\{ACTION_HOME\}/runner_$\{1\}"
   cd $RUNNER_HOME
   echo "Getting token to get metadata of EC2 instance"
-  TOKEN=$(curl -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600")
+  TOKEN=$(curl -s -f --connect-timeout 5 --retry 3 -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600")
   echo Getting ec2 instance id
-  export INSTANCE_ID=$(curl -H "X-aws-ec2-metadata-token: $\{TOKEN\}" -v http://169.254.169.254/latest/meta-data/instance-id)
+  export INSTANCE_ID=$(curl -s -f --connect-timeout 5 --retry 3 -H "X-aws-ec2-metadata-token: $\{TOKEN\}" http://169.254.169.254/latest/meta-data/instance-id)
   echo "Got instance id $\{INSTANCE_ID\}"
   export RUNNER_NAME="$\{INSTANCE_ID\}_runner_$\{1\}"
   echo "Runner name is $\{RUNNER_NAME\}"
+
+  RAW_UD=$(curl -s -f --connect-timeout 5 --retry 3 -H "X-aws-ec2-metadata-token: $\{TOKEN\}" http://169.254.169.254/latest/user-data 2>/dev/null)
+  DYNAMIC_GH=$(echo "$RAW_UD" | grep -m 1 '^ *# EXPORT_GH_TOKEN=' | cut -d'"' -f2)
+  EFF_GH_TOKEN="$\{DYNAMIC_GH:-${githubToken}\}"
+
   echo "Getting runner token"
   export RUNNER_TOKEN=$(curl -s -XPOST \
-    -H "authorization: token ${githubToken}" \
+    -H "authorization: token $\{EFF_GH_TOKEN\}" \
     https://api.github.com/repos/${config.githubContext.owner}/${config.githubContext.repo}/actions/runners/registration-token | \
     jq -r .token)
+  if [ -z "$RUNNER_TOKEN" ] || [ "$RUNNER_TOKEN" = "null" ]; then
+    echo "ERROR: Failed to fetch valid runner registration token from GitHub API" >&2
+    exit 1
+  fi
   if [ -f ".runner" ]; then
     echo Unregistering old runner data
-    su -p "action-user" -c bash -c "./config.sh remove --token $\{RUNNER_TOKEN\}"
+    su -p "action-user" -c "cd $\{RUNNER_HOME\} && ./config.sh remove --token $\{RUNNER_TOKEN\}"
   fi
   echo "Registering runner"
-  su -p "action-user" -c bash -c './config.sh \
+  su -p "action-user" -c "cd $\{RUNNER_HOME\} && ./config.sh \
     --url https://github.com/${config.githubContext.owner}/${config.githubContext.repo} \
     --token $\{RUNNER_TOKEN\} \
-    --labels "$\{INSTANCE_ID\},$\{RUNNER_NAME\},${generalLabels}" \
-    --name "$\{RUNNER_NAME\}" \
+    --labels \"$\{INSTANCE_ID\},$\{RUNNER_NAME\},${generalLabels}\" \
+    --name \"$\{RUNNER_NAME\}\" \
     --unattended \
-    --replace'
+    --replace"
 
   echo "Starting runner"
-  su -l "action-user" -c RUNNER_HOME=$RUNNER_HOME bash -c "cd $\{RUNNER_HOME\} && ./run.sh"
+  rm -rf "$\{RUNNER_HOME\}/_diag/*"
+  su - "action-user" -c "cd $\{RUNNER_HOME\} && nohup ./run.sh > runner.log 2>&1 &"
+
+  echo "Waiting for runner $\{RUNNER_NAME\} to connect to GitHub Actions..."
+  for j in $(seq 1 60); do
+    LATEST_LOG=$(ls -t $\{RUNNER_HOME\}/_diag/Runner_*.log 2>/dev/null | head -n 1)
+    if [ -n "$LATEST_LOG" ] && grep -q "Listening for Jobs" "$LATEST_LOG" 2>/dev/null; then
+      echo "Runner $\{RUNNER_NAME\} connected successfully!"
+      echo "RUNNER_STATUS_ONLINE" > /dev/console 2>/dev/null
+      echo "RUNNER_STATUS_ONLINE" > /dev/ttyS0 2>/dev/null
+      echo "RUNNER_STATUS_ONLINE" > /dev/ttyAMA0 2>/dev/null
+      DYNAMIC_AK=$(echo "$RAW_UD" | grep -m 1 '^ *# EXPORT_AWS_ACCESS_KEY_ID=' | cut -d'"' -f2)
+      DYNAMIC_SK=$(echo "$RAW_UD" | grep -m 1 '^ *# EXPORT_AWS_SECRET_ACCESS_KEY=' | cut -d'"' -f2)
+      DYNAMIC_ST=$(echo "$RAW_UD" | grep -m 1 '^ *# EXPORT_AWS_SESSION_TOKEN=' | cut -d'"' -f2)
+      if [ -n "$DYNAMIC_AK" ]; then export AWS_ACCESS_KEY_ID="$DYNAMIC_AK"; fi
+      if [ -n "$DYNAMIC_SK" ]; then export AWS_SECRET_ACCESS_KEY="$DYNAMIC_SK"; fi
+      if [ -n "$DYNAMIC_ST" ]; then export AWS_SESSION_TOKEN="$DYNAMIC_ST"; fi
+      if ! command -v aws >/dev/null 2>&1; then
+        command -v apt-get >/dev/null 2>&1 && sudo apt-get update -qq >/dev/null && sudo apt-get -o DPkg::Lock::Timeout=60 install -y awscli >/dev/null 2>&1
+        command -v yum >/dev/null 2>&1 && sudo yum -y install awscli >/dev/null 2>&1
+        command -v dnf >/dev/null 2>&1 && sudo dnf -y install awscli >/dev/null 2>&1
+      fi
+      if command -v aws >/dev/null 2>&1; then
+        (
+${awsCredsEnv}
+          export AWS_DEFAULT_REGION="${awsRegion}"
+          aws ec2 create-tags --resources $\{INSTANCE_ID\} --tags Key=RunnerStatus,Value=online ${awsRegion ? `--region "${awsRegion}"` : ''}
+        )
+      fi
+      break
+    fi
+    sleep 2
+  done
 }
 
+ensure_aws_cli() {
+  if ! command -v aws >/dev/null 2>&1; then
+    echo "Installing AWS CLI..."
+    if command -v apt-get >/dev/null 2>&1; then
+      sudo apt-get update -qq >/dev/null && sudo apt-get -o DPkg::Lock::Timeout=60 install -y awscli
+    elif command -v yum >/dev/null 2>&1; then
+      sudo yum -y install awscli
+    elif command -v dnf >/dev/null 2>&1; then
+      sudo dnf -y install awscli
+    fi
+  fi
+}
+ensure_aws_cli
+
 export ACTION_HOME="/home/action-user"
-export RUNNER_VERSION="2.319.1"
+export RUNNER_VERSION="${runnerVersion}"
 case $(uname) in Darwin) OS="osx" ;; Linux) OS="linux" ;; esac && export RUNNER_OS=$\{OS\}
 case $(uname -m) in aarch64|arm64) ARCH="arm64" ;; amd64|x86_64) ARCH="x64" ;; esac && export RUNNER_ARCH=$\{ARCH\}
-if [ ! -f /var/lib/actions-runner.tar.gz ]; then
-curl -L "https://github.com/actions/runner/releases/download/v$\{RUNNER_VERSION\}/actions-runner-$\{RUNNER_OS\}-$\{RUNNER_ARCH\}-$\{RUNNER_VERSION\}.tar.gz" \
-  -o /var/lib/actions-runner.tar.gz
+INSTALLED_VERSION=""
+if [ -f /var/lib/actions-runner.version ]; then
+  INSTALLED_VERSION=$(cat /var/lib/actions-runner.version)
+fi
+if [ ! -f /var/lib/actions-runner.tar.gz ] || [ "$\{INSTALLED_VERSION\}" != "$\{RUNNER_VERSION\}" ]; then
+  echo "Downloading GitHub runner v$\{RUNNER_VERSION\}..."
+  curl -L "https://github.com/actions/runner/releases/download/v$\{RUNNER_VERSION\}/actions-runner-$\{RUNNER_OS\}-$\{RUNNER_ARCH\}-$\{RUNNER_VERSION\}.tar.gz" \
+    -o /var/lib/actions-runner.tar.gz
+  echo "$\{RUNNER_VERSION\}" > /var/lib/actions-runner.version
 fi
 if [ ! -d "$\{ACTION_HOME\}" ]; then
   groupadd "action-user"
@@ -161279,8 +161360,8 @@ if [ ! -d "$\{ACTION_HOME\}" ]; then
   command -v apt-get >/dev/null 2>&1 \
     && { echo "Installing dependencies with apt-get"; \
       sudo apt-get update -qq >/dev/null; \
-      command -v jq >/dev/null 2>&1 || sudo apt-get install -y jq; \
-      command -v git >/dev/null 2>&1 || sudo apt-get install -y git; }
+      command -v jq >/dev/null 2>&1 || sudo apt-get -o DPkg::Lock::Timeout=60 install -y jq; \
+      command -v git >/dev/null 2>&1 || sudo apt-get -o DPkg::Lock::Timeout=60 install -y git; }
   command -v docker \
   || { curl -fsSL https://get.docker.com -o get-docker.sh; \
       sudo sh get-docker.sh; }
@@ -161294,6 +161375,32 @@ if [ ! -d "$\{ACTION_HOME\}" ]; then
   done
   chown -R "action-user:action-user" $ACTION_HOME
 fi
+
+mkdir -p /var/lib/cloud/scripts/per-boot
+cat << 'EOF_PER_BOOT' > /var/lib/cloud/scripts/per-boot/start-runner.sh
+#!/bin/bash
+set -x
+echo "Executing EC2 GitHub Runner Per-Boot Handler..."
+TOKEN=$(curl -s -f --connect-timeout 5 --retry 3 -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600")
+RAW_UD=$(curl -s -f --connect-timeout 5 --retry 3 -H "X-aws-ec2-metadata-token: $\{TOKEN\}" http://169.254.169.254/latest/user-data 2>/dev/null)
+
+SHELL_SCRIPT=$(echo "$RAW_UD" | awk '/^#!\\/bin\\/bash/{p=1} p' | sed '/^--\\/\\//q' | grep -v '^--\\/\\/')
+
+if [ -z "$SHELL_SCRIPT" ]; then
+  DECODED_UD=$(echo "$RAW_UD" | base64 -d 2>/dev/null)
+  if [ -n "$DECODED_UD" ]; then
+    SHELL_SCRIPT=$(echo "$DECODED_UD" | awk '/^#!\\/bin\\/bash/{p=1} p' | sed '/^--\\/\\//q' | grep -v '^--\\/\\/')
+  fi
+fi
+
+if [ -n "$SHELL_SCRIPT" ]; then
+  echo "$SHELL_SCRIPT" > /tmp/latest_userdata.sh
+  chmod +x /tmp/latest_userdata.sh
+  /bin/bash /tmp/latest_userdata.sh
+fi
+EOF_PER_BOOT
+
+chmod +x /var/lib/cloud/scripts/per-boot/start-runner.sh
 
 for i in $(seq 1 ${runnerCount}); do
   start_runner $i &
@@ -161313,10 +161420,24 @@ function getRunnersInfo(instanceId) {
   return info;
 }
 
-async function startEc2Instance(githubToken) {
+async function startEc2Instance(githubToken, runnerVersion = '2.336.0') {
   const ec2 = new AWS.EC2();
+  let awsCreds = null;
+  try {
+    awsCreds = await ec2.config.credentials();
+  } catch (error) {
+    core.warning(`Failed to retrieve AWS credentials for user-data tagging: ${error ? error.message : error}`);
+  }
+
+  let awsRegion = '';
+  try {
+    awsRegion = (await ec2.config.region()) || process.env.AWS_REGION || process.env.AWS_DEFAULT_REGION || '';
+  } catch (error) {
+    core.warning(`Failed to retrieve AWS region for user-data tagging: ${error ? error.message : error}`);
+  }
+
+  let isReusable = config.input.reuseRunner === 'true';
   const tagsFilters = [];
-  let instanceId = null;
   const generalLabels = [];
 
   for (const tag of config.tagSpecifications) {
@@ -161324,7 +161445,7 @@ async function startEc2Instance(githubToken) {
     generalLabels.push(tag.Value);
   }
 
-  const userData = buildUserDataScript(githubToken, config.input.runnerCount, generalLabels.join(','));
+  const userData = buildUserDataScript(githubToken, config.input.runnerCount, generalLabels.join(','), runnerVersion, awsCreds, awsRegion);
 
   const runParams = {
     ImageId: config.input.ec2ImageId,
@@ -161341,6 +161462,7 @@ async function startEc2Instance(githubToken) {
         },
       },
     ],
+    MetadataOptions: { HttpTokens: 'required' },
     UserData: Buffer.from(userData).toString('base64'),
     SubnetId: config.input.subnetId,
     SecurityGroupIds: [config.input.securityGroupId],
@@ -161359,78 +161481,140 @@ async function startEc2Instance(githubToken) {
     },
   };
 
-  const startParams = {
-    InstanceIds: [],
-  };
   if (config.input.reuseRunner === 'true') {
     const describeParams = {
       Filters: [
         ...tagsFilters,
-        { Name: 'instance-state-name', Values: ['stopped'] },
+        { Name: 'instance-state-name', Values: ['pending', 'running', 'stopping', 'stopped'] },
         { Name: 'instance-type', Values: [config.input.ec2InstanceType] },
         { Name: 'image-id', Values: [config.input.ec2ImageId] },
       ],
     };
 
-    core.info(`Checking for stopped instance with filter ${JSON.stringify(describeParams)}`);
+    core.info(`Checking for resumable instances with filter ${JSON.stringify(describeParams)}`);
 
     try {
       const result = await ec2.describeInstances(describeParams);
-      if (
-        result.Reservations !== null &&
-        result.Reservations.length > 0 &&
-        result.Reservations[0].Instances[0].State.Name !== 'terminated'
-      ) {
-        instanceId = result.Reservations[0].Instances[0].InstanceId;
-      }
-      if (instanceId !== null && instanceId !== undefined) {
-        startParams.InstanceIds.push(instanceId);
-      }
-    } catch (error) {
-      core.error('Failed to check for hibernated instance');
-      throw error;
-    }
-  }
+      const stoppedInstances = [];
+      let totalInstancesCount = 0;
 
-  if (config.input.reuseRunner === 'true' && startParams.InstanceIds.length > 0) {
-    try {
-      const result = await ec2.startInstances(startParams);
-      const ec2InstanceId = result.StartingInstances[0].InstanceId;
-      core.info(`AWS EC2 instance ${ec2InstanceId} is starting`);
-      return getRunnersInfo(ec2InstanceId);
-    } catch (error) {
-      core.warning('AWS EC2 instance starting error');
-      core.warning(`${error.name}: ${error.message}`);
-      if (error.name.indexOf('InsufficientInstanceCapacity') >= 0) {
-        delete runParams.InstanceMarketOptions;
-      } else if (error.name.indexOf('IncorrectSpotRequestState') >= 0) {
-        runParams.InstanceInitiatedShutdownBehavior = 'terminate';
-        runParams.InstanceMarketOptions = {
-          MarketType: 'spot',
-          SpotOptions: {
-            InstanceInterruptionBehavior: 'terminate',
-            SpotInstanceType: 'one-time',
-          },
-        };
-      } else {
-        throw error;
+      if (result && result.Reservations) {
+        for (const reservation of result.Reservations) {
+          if (reservation.Instances) {
+            for (const instance of reservation.Instances) {
+              totalInstancesCount++;
+              if (instance.State && instance.State.Name === 'stopped') {
+                stoppedInstances.push(instance.InstanceId);
+              }
+            }
+          }
+        }
       }
+
+      if (stoppedInstances.length > 0) {
+        // Shuffle the remaining stopped instances to distribute load and reduce collisions
+        stoppedInstances.sort(() => Math.random() - 0.5);
+
+        for (const id of stoppedInstances) {
+          try {
+            try {
+              await ec2.modifyInstanceAttribute({
+                InstanceId: id,
+                UserData: { Value: Buffer.from(userData) },
+              });
+            } catch (attrError) {
+              core.warning(`Failed to modify instance UserData attribute for ${id}: ${attrError ? attrError.message : attrError}`);
+            }
+            const startResult = await ec2.startInstances({ InstanceIds: [id] });
+            const previousState = startResult.StartingInstances[0].PreviousState.Name;
+
+            // AWS guarantees the instance state transitions atomically. If it was already
+            // pending or running, another workflow won the race condition.
+            if (previousState === 'stopped') {
+              core.info(`AWS EC2 instance ${id} is starting`);
+              try {
+                await ec2.deleteTags({
+                  Resources: [id],
+                  Tags: [{ Key: TAG_RUNNER_STATUS }],
+                });
+              } catch (tagClearError) {
+                // Ignore if tag doesn't exist
+              }
+              try {
+                await ec2.createTags({
+                  Resources: [id],
+                  Tags: [{ Key: TAG_REUSE_RUNNER, Value: 'true' }],
+                });
+              } catch (tagError) {
+                core.warning(`Failed to tag instance ${id} with ${TAG_REUSE_RUNNER}=true: ${tagError ? tagError.message : tagError}`);
+              }
+              return getRunnersInfo(id);
+            } else {
+              core.info(`AWS EC2 instance ${id} was already starting (race condition lost), trying another...`);
+            }
+          } catch (error) {
+            const errName = (error && error.name) || '';
+            core.warning(`AWS EC2 instance ${id} starting error`);
+            core.warning(`${errName}: ${error ? error.message : error}`);
+            if (errName.includes('InsufficientInstanceCapacity')) {
+              delete runParams.InstanceMarketOptions;
+              runParams.InstanceInitiatedShutdownBehavior = 'terminate';
+              isReusable = false;
+            } else if (errName.includes('IncorrectSpotRequestState')) {
+              runParams.InstanceInitiatedShutdownBehavior = 'terminate';
+              runParams.InstanceMarketOptions = {
+                MarketType: 'spot',
+                SpotOptions: {
+                  InstanceInterruptionBehavior: 'terminate',
+                  SpotInstanceType: 'one-time',
+                },
+              };
+              isReusable = false;
+            }
+          }
+        }
+      }
+
+      // If we couldn't reuse any runner, we are going to fall through and create a new one.
+      // We check if we have already reached the maximum allowed resumable instances.
+      if (config.input.maxReusableInstances > 0 && totalInstancesCount >= config.input.maxReusableInstances) {
+        core.info(`Total instances count (${totalInstancesCount}) reached the limit (${config.input.maxReusableInstances}).`);
+        core.info('The new runner will be launched as a standard non-resumable instance to prevent EBS leaks.');
+        runParams.InstanceInitiatedShutdownBehavior = 'terminate';
+        if (runParams.InstanceMarketOptions && runParams.InstanceMarketOptions.SpotOptions) {
+          runParams.InstanceMarketOptions.SpotOptions.InstanceInterruptionBehavior = 'terminate';
+          runParams.InstanceMarketOptions.SpotOptions.SpotInstanceType = 'one-time';
+        }
+        isReusable = false;
+      }
+    } catch (error) {
+      core.error('Failed to check for resumable instances');
+      throw error;
     }
   }
 
   let lastError = null;
   for (let i = 0; i < 2; i++) {
     try {
+      const instanceTags = [...config.tagSpecifications, { Key: TAG_REUSE_RUNNER, Value: isReusable ? 'true' : 'false' }];
+      runParams.TagSpecifications = [
+        { ResourceType: 'instance', Tags: instanceTags },
+        { ResourceType: 'volume', Tags: config.tagSpecifications },
+      ];
+
       const result = await ec2.runInstances(runParams);
       const ec2InstanceId = result.Instances[0].InstanceId;
       core.info(`AWS EC2 instance ${ec2InstanceId} is starting`);
       return getRunnersInfo(ec2InstanceId);
     } catch (error) {
+      const errName = (error && error.name) || '';
       core.warning('AWS EC2 instance starting error');
-      core.warning(`${error.name}: ${error.message}`);
+      core.warning(`${errName}: ${error ? error.message : error}`);
       lastError = error;
-      if (error.name.indexOf('InsufficientInstanceCapacity') >= 0) {
+      if (errName.includes('InsufficientInstanceCapacity')) {
         delete runParams.InstanceMarketOptions;
+        runParams.InstanceInitiatedShutdownBehavior = 'terminate';
+        isReusable = false;
         continue;
       }
       throw error;
@@ -161440,43 +161624,88 @@ async function startEc2Instance(githubToken) {
   throw lastError;
 }
 
-async function terminateEc2Instance() {
+async function terminateEc2Instance(specifiedInstanceId, forceTerminate = false) {
   const ec2 = new AWS.EC2();
+  const instanceId = specifiedInstanceId || config.input.ec2InstanceId;
+
+  if (!instanceId) {
+    core.warning('No EC2 instance ID provided for termination');
+    return;
+  }
 
   const params = {
-    InstanceIds: [config.input.ec2InstanceId],
+    InstanceIds: [instanceId],
   };
 
+  let shouldReuse = config.input.reuseRunner === 'true';
+
+  if (!forceTerminate) {
+    try {
+      const describeResult = await ec2.describeInstances({ InstanceIds: [instanceId] });
+      if (describeResult && describeResult.Reservations && describeResult.Reservations[0] && describeResult.Reservations[0].Instances) {
+        const instance = describeResult.Reservations[0].Instances[0];
+        const tags = instance.Tags || [];
+        const reuseTag = tags.find((t) => t.Key === TAG_REUSE_RUNNER);
+        if (reuseTag) {
+          shouldReuse = reuseTag.Value === 'true';
+          core.info(`Found ${TAG_REUSE_RUNNER} tag on instance ${instanceId}: ${reuseTag.Value}`);
+        } else {
+          core.info(`No ${TAG_REUSE_RUNNER} tag found on instance ${instanceId}. Falling back to input reuseRunner: ${config.input.reuseRunner}`);
+        }
+      }
+    } catch (describeError) {
+      core.warning(
+        `Failed to describe instance ${instanceId} to check ${TAG_REUSE_RUNNER} tag: ${describeError ? describeError.message : describeError}. Falling back to input reuseRunner: ${config.input.reuseRunner}`
+      );
+    }
+  } else {
+    core.info(`Force terminate flag set for instance ${instanceId}. Skipping reuse check.`);
+    shouldReuse = false;
+  }
+
   try {
-    if (config.input.reuseRunner === 'true') {
+    if (shouldReuse) {
+      try {
+        await ec2.deleteTags({
+          Resources: [instanceId],
+          Tags: [{ Key: TAG_RUNNER_STATUS }],
+        });
+        core.info(`AWS EC2 instance ${instanceId} ${TAG_RUNNER_STATUS} tag cleared`);
+      } catch (tagError) {
+        core.warning(`Failed to clear ${TAG_RUNNER_STATUS} tag on instance ${instanceId}: ${tagError ? tagError.message : tagError}`);
+      }
       await ec2.stopInstances(params);
-      core.info(`AWS EC2 instance ${config.input.ec2InstanceId} is stopped`);
+      core.info(`AWS EC2 instance ${instanceId} is stopped`);
       return;
     }
   } catch (error) {
-    core.warning(`AWS EC2 instance ${config.input.ec2InstanceId} termination error`);
-    core.warning(`${error.name}: ${error.message}`);
-    if (error.name.indexOf('UnsupportedOperation') < 0) {
+    const errName = (error && error.name) || '';
+    core.warning(`AWS EC2 instance ${instanceId} termination error`);
+    core.warning(`${errName}: ${error ? error.message : error}`);
+    if (!errName.includes('UnsupportedOperation')) {
       throw error;
     }
   }
 
   const spotRequestQuery = {
-    Filters: [{ Name: 'instance-id', Value: [config.input.ec2InstanceId] }],
+    Filters: [{ Name: 'instance-id', Value: [instanceId] }],
   };
-  const result = await ec2.describeSpotInstanceRequests(spotRequestQuery);
-  if (result.SpotInstanceRequests !== null && result.SpotInstanceRequests.length > 0) {
-    const spotCancelRequest = {
-      SpotInstanceRequestIds: result.SpotInstanceRequests.map((x) => x.SpotInstanceRequestId),
-    };
+  try {
+    const result = await ec2.describeSpotInstanceRequests(spotRequestQuery);
+    if (result && Array.isArray(result.SpotInstanceRequests) && result.SpotInstanceRequests.length > 0) {
+      const spotCancelRequest = {
+        SpotInstanceRequestIds: result.SpotInstanceRequests.map((x) => x.SpotInstanceRequestId),
+      };
 
-    await ec2.cancelSpotInstanceRequests(spotCancelRequest);
-    core.info(`AWS EC2 instance ${config.input.ec2InstanceId} is terminated along with its spot request`);
-    return;
+      await ec2.cancelSpotInstanceRequests(spotCancelRequest);
+      core.info(`AWS EC2 spot instance request(s) canceled for ${instanceId}`);
+    }
+  } catch (error) {
+    core.warning(`Spot instance request cancel error: ${error ? error.message : error}`);
   }
 
   await ec2.terminateInstances(params);
-  core.info(`AWS EC2 instance ${config.input.ec2InstanceId} is terminated`);
+  core.info(`AWS EC2 instance ${instanceId} is terminated`);
 }
 
 async function waitForInstanceRunning(runnersInfo) {
@@ -161496,10 +161725,81 @@ async function waitForInstanceRunning(runnersInfo) {
   }
 }
 
+async function waitForRunnerReady(runnersInfo) {
+  const ec2 = new AWS.EC2();
+  const ec2InstanceId = runnersInfo.instanceId;
+  const timeoutMinutes = 5;
+  const retryIntervalSeconds = 5;
+  const maxAttempts = Math.floor((timeoutMinutes * 60) / retryIntervalSeconds);
+
+  core.info(`Checking AWS EC2 instance ${ec2InstanceId} for self-hosted runner readiness every ${retryIntervalSeconds}s...`);
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      const describeResult = await ec2.describeInstances({
+        InstanceIds: [ec2InstanceId],
+      });
+
+      if (describeResult && describeResult.Reservations && describeResult.Reservations[0] && describeResult.Reservations[0].Instances) {
+        const instance = describeResult.Reservations[0].Instances[0];
+        const stateName = instance.State ? instance.State.Name : '';
+
+        if (stateName === 'terminated' || stateName === 'stopped') {
+          throw new Error(`AWS EC2 instance ${ec2InstanceId} was unexpectedly ${stateName}`);
+        }
+
+        const tags = instance.Tags || [];
+        const runnerStatusTag = tags.find((t) => t.Key === TAG_RUNNER_STATUS);
+        if (runnerStatusTag && runnerStatusTag.Value === RUNNER_STATUS_ONLINE) {
+          core.info(`AWS EC2 self-hosted runner on instance ${ec2InstanceId} is registered and ready to use (via EC2 tag)`);
+          return;
+        }
+      }
+
+      // 2. Fallback: Check GitHub API only after 3 minutes (attempt > 36) to prevent rate limits
+      if (attempt > 36 && attempt % 3 === 0) {
+        try {
+          const ghRunners = await gh.getRunners(ec2InstanceId);
+          if (ghRunners) {
+            const readyRunners = ghRunners
+              .filter((r) => runnersInfo.runners.indexOf(r.name) >= 0)
+              .filter((r) => r.status === 'online');
+            if (readyRunners.length >= parseInt(config.input.runnerCount || '1', 10)) {
+              core.info(`GitHub self-hosted runner on instance ${ec2InstanceId} is registered and ready to use (via GitHub API)`);
+              try {
+                await ec2.createTags({
+                  Resources: [ec2InstanceId],
+                  Tags: [{ Key: TAG_RUNNER_STATUS, Value: RUNNER_STATUS_ONLINE }],
+                });
+              } catch (e) {
+                core.warning(`Failed to create ${TAG_RUNNER_STATUS} tag for instance ${ec2InstanceId}: ${e ? e.message : e}`);
+              }
+              return;
+            }
+          }
+        } catch (ghError) {
+          core.warning(`GitHub API readiness check error for instance ${ec2InstanceId}: ${ghError ? ghError.message : ghError}`);
+        }
+      }
+
+    } catch (error) {
+      if (error.message && error.message.includes('unexpectedly')) {
+        throw error;
+      }
+      core.warning(`Checking status for AWS EC2 instance ${ec2InstanceId}: ${error.message}`);
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, retryIntervalSeconds * 1000));
+  }
+
+  throw new Error(`A timeout of ${timeoutMinutes} minutes is exceeded waiting for runner on AWS EC2 instance ${ec2InstanceId}.`);
+}
+
 module.exports = {
   startEc2Instance,
   terminateEc2Instance,
   waitForInstanceRunning,
+  waitForRunnerReady,
 };
 
 
@@ -161525,13 +161825,27 @@ class Config {
       ec2InstanceId: core.getInput('ec2-instance-id'),
       iamRoleName: core.getInput('iam-role-name'),
       reuseRunner: core.getInput('reuse-runner'),
+      maxReusableInstances: core.getInput('max-reusable-instances') !== '' ? parseInt(core.getInput('max-reusable-instances'), 10) : 2,
       runnerCount: core.getInput('runner-count'),
     };
 
-    const jsonTags = JSON.parse(core.getInput('aws-resource-tags'));
-    this.tagSpecifications = [{ Key: 'runner-count', Value: core.getInput('runner-count') }];
+    let jsonTags = {};
+    const tagsInput = core.getInput('aws-resource-tags');
+    if (tagsInput) {
+      try {
+        const parsed = JSON.parse(tagsInput);
+        if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+          jsonTags = parsed;
+        } else {
+          core.warning(`aws-resource-tags input is not a JSON object, ignoring custom tags.`);
+        }
+      } catch (e) {
+        core.warning(`Failed to parse aws-resource-tags as JSON: ${e.message}`);
+      }
+    }
+    this.tagSpecifications = [{ Key: 'runner-count', Value: core.getInput('runner-count') || '1' }];
     for (const [key, value] of Object.entries(jsonTags)) {
-      this.tagSpecifications.push({ Key: key, Value: value });
+      this.tagSpecifications.push({ Key: key, Value: String(value) });
     }
 
     // the values of github.context.repo.owner and github.context.repo.repo are taken from
@@ -161591,16 +161905,41 @@ const github = __nccwpck_require__(95438);
 const _ = __nccwpck_require__(90250);
 const config = __nccwpck_require__(34570);
 
+async function getLatestRunnerVersion() {
+  const defaultVersion = '2.336.0';
+  try {
+    const octokit = github.getOctokit(config.input.githubToken);
+    const release = await octokit.request('GET /repos/{owner}/{repo}/releases/latest', {
+      owner: 'actions',
+      repo: 'runner',
+    });
+    if (release && release.data && release.data.tag_name) {
+      const version = release.data.tag_name.replace(/^v/, '');
+      core.info(`Fetched latest GitHub Actions runner version: ${version}`);
+      return version;
+    }
+  } catch (error) {
+    core.warning(`Failed to fetch latest runner version from GitHub API (${error.message}), falling back to default v${defaultVersion}`);
+  }
+  return defaultVersion;
+}
+
 // use the unique ec2-instance-id to find the runner
 // as we don't have the runner's id, it's not possible to get it in any other way
 async function getRunners(ec2InstanceId) {
   const octokit = github.getOctokit(config.input.githubToken);
 
   try {
-    const runners = await octokit.paginate('GET /repos/{owner}/{repo}/actions/runners', config.githubContext);
-    const foundRunners = _.filter(runners, { labels: [{ name: ec2InstanceId }] });
-    return foundRunners.length > 0 ? foundRunners : null;
+    const runners = await octokit.paginate(
+      'GET /repos/{owner}/{repo}/actions/runners',
+      Object.assign({}, config.githubContext, { per_page: 100 })
+    );
+    const matches = _.filter(runners, (runner) => {
+      return runner.labels && runner.labels.some((l) => l.name === ec2InstanceId);
+    });
+    return matches.length > 0 ? matches : null;
   } catch (error) {
+    core.warning(`GitHub API error while getting runners: ${error.message}`);
     return null;
   }
 }
@@ -161617,7 +161956,7 @@ async function removeRunner() {
 
   try {
     for (const runner of runners) {
-      await octokit.request('DELETE /repos/{owner}/{repo}/actions/runners/{runner_id}', _.merge(config.githubContext, { runner_id: runner.id }));
+      await octokit.request('DELETE /repos/{owner}/{repo}/actions/runners/{runner_id}', Object.assign({}, config.githubContext, { runner_id: runner.id }));
       core.info(`GitHub self-hosted runner ${runner.name} is removed`);
     }
     return;
@@ -161627,56 +161966,10 @@ async function removeRunner() {
   }
 }
 
-async function waitForRunnerRegistered(runnersInfo) {
-  const timeoutMinutes = 5;
-  const retryIntervalSeconds = 10;
-  const quietPeriodSeconds = 30;
-  const ec2InstanceId = runnersInfo.instanceId;
-  const waitSeconds = 0;
-
-  core.info(`Waiting ${quietPeriodSeconds}s for the AWS EC2 instance to be registered in GitHub as a new self-hosted runner`);
-  await new Promise((r) => setTimeout(r, quietPeriodSeconds * 1000));
-  core.info(`Checking every ${retryIntervalSeconds}s if the GitHub self-hosted runner is registered`);
-
-  return new Promise((resolve, reject) => {
-    const interval = setInterval(async () => {
-      const runners = await getRunners(ec2InstanceId);
-
-      if (waitSeconds > timeoutMinutes * 60) {
-        core.error('GitHub self-hosted runner registration error');
-        clearInterval(interval);
-        reject(
-          `A timeout of ${timeoutMinutes} minutes is exceeded. Your AWS EC2 instance was not able to register itself in GitHub as a new self-hosted runner.`
-        );
-      }
-
-      if (!runners) {
-        core.info("Don't see any runner yet. Waiting...");
-        return;
-      }
-
-      core.info(`Found runners ${JSON.stringify(runners)}`);
-      const readyRunners = runners
-        .filter((runner) => runnersInfo.runners.indexOf(runner.name) >= 0)
-        .filter((runner) => runner.status === 'online' && runner.busy === false);
-      core.info(`Found ready runners ${JSON.stringify(readyRunners)}`);
-      if (readyRunners.length < config.input.runnerCount) {
-        core.info('Not all runners are ready. Waiting...');
-        return;
-      }
-
-      for (const runner of runners) {
-        core.info(`GitHub self-hosted runner ${runner.name} is registered and ready to use`);
-      }
-      clearInterval(interval);
-      resolve();
-    }, retryIntervalSeconds * 1000);
-  });
-}
-
 module.exports = {
+  getLatestRunnerVersion,
+  getRunners,
   removeRunner,
-  waitForRunnerRegistered,
 };
 
 
@@ -161954,10 +162247,25 @@ function setOutput(runnersInfo) {
 }
 
 async function start() {
-  const runnersInfo = await aws.startEc2Instance(config.input.githubToken);
-  setOutput(runnersInfo);
-  await aws.waitForInstanceRunning(runnersInfo);
-  await gh.waitForRunnerRegistered(runnersInfo);
+  const runnerVersion = await gh.getLatestRunnerVersion();
+  let runnersInfo;
+  try {
+    runnersInfo = await aws.startEc2Instance(config.input.githubToken, runnerVersion);
+    setOutput(runnersInfo);
+    await aws.waitForInstanceRunning(runnersInfo);
+    await aws.waitForRunnerReady(runnersInfo);
+  } catch (error) {
+    if (runnersInfo && runnersInfo.instanceId) {
+      core.warning(`Initialization failed. Attempting cleanup for EC2 instance ${runnersInfo.instanceId}...`);
+      try {
+        await aws.terminateEc2Instance(runnersInfo.instanceId, true);
+        core.info(`Cleaned up EC2 instance ${runnersInfo.instanceId}`);
+      } catch (cleanupError) {
+        core.error(`CRITICAL: Failed to automatically terminate EC2 instance ${runnersInfo.instanceId} due to AWS error: ${cleanupError.message}. Please terminate this instance manually in the AWS Console.`);
+      }
+    }
+    throw error;
+  }
 }
 
 async function stop() {
