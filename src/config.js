@@ -17,6 +17,7 @@ class Config {
       reuseRunner: core.getInput('reuse-runner'),
       maxReusableInstances: core.getInput('max-reusable-instances') !== '' ? parseInt(core.getInput('max-reusable-instances'), 10) : 2,
       runnerCount: core.getInput('runner-count'),
+      ec2MarketType: (core.getInput('ec2-market-type') || 'spot').trim().toLowerCase(),
     };
 
     let jsonTags = {};
@@ -56,6 +57,10 @@ class Config {
 
     if (!this.input.githubToken) {
       throw new Error(`The 'github-token' input is not specified`);
+    }
+
+    if (!['spot', 'on-demand'].includes(this.input.ec2MarketType)) {
+      throw new Error(`Wrong ec2-market-type '${this.input.ec2MarketType}'. Allowed values: spot, on-demand.`);
     }
 
     if (this.input.mode === 'start') {

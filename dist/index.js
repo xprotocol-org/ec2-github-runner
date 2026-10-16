@@ -161436,7 +161436,10 @@ async function startEc2Instance(githubToken, runnerVersion = '2.336.0') {
     core.warning(`Failed to retrieve AWS region for user-data tagging: ${error ? error.message : error}`);
   }
 
-  let isReusable = config.input.reuseRunner === 'true';
+  // On-demand is launched fresh and terminated at stop, whatever reuse-runner
+  // says: an on-demand instance is the expensive one, kept only for the job.
+  const onDemand = config.input.ec2MarketType === 'on-demand';
+  let isReusable = config.input.reuseRunner === 'true' && !onDemand;
   const tagsFilters = [];
   const generalLabels = [];
 
@@ -161471,17 +161474,22 @@ async function startEc2Instance(githubToken, runnerVersion = '2.336.0') {
       { ResourceType: 'instance', Tags: config.tagSpecifications },
       { ResourceType: 'volume', Tags: config.tagSpecifications },
     ],
-    InstanceInitiatedShutdownBehavior: config.input.reuseRunner === 'true' ? 'stop' : 'terminate',
+    InstanceInitiatedShutdownBehavior: isReusable ? 'stop' : 'terminate',
     InstanceMarketOptions: {
       MarketType: 'spot',
       SpotOptions: {
-        InstanceInterruptionBehavior: config.input.reuseRunner === 'true' ? 'stop' : 'terminate',
-        SpotInstanceType: config.input.reuseRunner === 'true' ? 'persistent' : 'one-time',
+        InstanceInterruptionBehavior: isReusable ? 'stop' : 'terminate',
+        SpotInstanceType: isReusable ? 'persistent' : 'one-time',
       },
     },
   };
 
-  if (config.input.reuseRunner === 'true') {
+  if (onDemand) {
+    delete runParams.InstanceMarketOptions;
+    core.info('Launching an on-demand instance; it is not reused and is terminated at stop.');
+  }
+
+  if (isReusable) {
     const describeParams = {
       Filters: [
         ...tagsFilters,
@@ -161827,6 +161835,7 @@ class Config {
       reuseRunner: core.getInput('reuse-runner'),
       maxReusableInstances: core.getInput('max-reusable-instances') !== '' ? parseInt(core.getInput('max-reusable-instances'), 10) : 2,
       runnerCount: core.getInput('runner-count'),
+      ec2MarketType: (core.getInput('ec2-market-type') || 'spot').trim().toLowerCase(),
     };
 
     let jsonTags = {};
@@ -161866,6 +161875,10 @@ class Config {
 
     if (!this.input.githubToken) {
       throw new Error(`The 'github-token' input is not specified`);
+    }
+
+    if (!['spot', 'on-demand'].includes(this.input.ec2MarketType)) {
+      throw new Error(`Wrong ec2-market-type '${this.input.ec2MarketType}'. Allowed values: spot, on-demand.`);
     }
 
     if (this.input.mode === 'start') {

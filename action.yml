@@ -17,6 +17,14 @@ inputs:
       will be hiberneted and resume if this is true.
     required: true
     default: "false"
+  ec2-market-type:
+    description: >-
+      'spot' (the default) or 'on-demand'. An on-demand runner is always
+      launched as a new instance and terminated at stop, whatever
+      reuse-runner says: it is the expensive kind, so none is kept around.
+      Use it for jobs that a spot interruption must not cut short.
+    required: false
+    default: "spot"
   max-reusable-instances:
     description: >-
       Specify the maximum number of reusable (persistent) instances to allow.
